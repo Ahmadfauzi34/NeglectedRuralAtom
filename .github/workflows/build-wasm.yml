@@ -1,0 +1,81 @@
+name: Build WASM
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch:  # manual trigger
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Install wasm-pack
+        run: |
+          curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+          wasm-pack --version
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Build release WASM
+        run: wasm-pack build --target web --release --out-dir pkg
+
+      - name: Optimize with wasm-opt (optional but recommended)
+        run: |
+          if command -v wasm-opt &> /dev/null; then
+            wasm-opt -Oz pkg/agentic_kernel_bg.wasm -o pkg/agentic_kernel_bg.wasm
+          else
+            echo "wasm-opt not installed, skipping"
+          fi
+
+      - name: List output
+        run: |
+          echo "=== Build Output ==="
+          ls -lah pkg/
+          echo ""
+          echo "=== File sizes ==="
+          du -h pkg/*
+          echo ""
+          echo "=== wasm-bindgen version ==="
+          head -n 5 pkg/package.json
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: wasm-build
+          path: pkg/
+          retention-days: 30
+
+      # Optional: Commit ke branch 'dist' untuk CDN/static hosting
+      - name: Commit to dist branch
+        if: github.ref == 'refs/heads/main'
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git checkout --orphan dist-temp || true
+          git rm -rf . || true
+          cp -r pkg/* .
+          git add .
+          git commit -m "Build WASM from ${{ github.sha }}" || echo "No changes"
+          git branch -M dist
+          git push -f origin dist || echo "Push failed"
+
