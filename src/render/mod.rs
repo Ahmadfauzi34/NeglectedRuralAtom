@@ -30,7 +30,7 @@ pub struct DrawCmd {
 pub mod agent_renderer;  // <-- TAMBAHKAN INI
 
 pub struct CanvasEncoder {
-    cmds: Vec<<DrawCmd>,      // <-- FIX: hapus <
+    cmds: Vec<DrawCmd>,      // <-- FIX: hapus <
     payload: Vec<u8>,
     flat: Vec<u8>,
 }
