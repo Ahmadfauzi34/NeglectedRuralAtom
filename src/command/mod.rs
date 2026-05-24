@@ -17,11 +17,11 @@ pub enum Command {
     Clear,
     
     #[serde(rename = "batch")]
-    Batch(Vec<<Command>),  // <-- FIX: hapus <
+    Batch(Vec<Command>),  // <-- FIX: hapus <
 }
 
 pub struct CommandBus {
-    queue: Vec<<Command>,  // <-- FIX: hapus <
+    queue: Vec<Command>,  // <-- FIX: hapus <
 }
 
 impl CommandBus {
@@ -36,14 +36,17 @@ impl CommandBus {
     }
     
     pub fn parse_batch(&mut self, json: &str) -> Result<(), serde_json::Error> {
-        let cmds: Vec<<Command> = serde_json::from_str(json)?;  // <-- FIX: hapus <
+        let cmds: Vec<Command> = serde_json::from_str(json)?;  // <-- FIX: hapus <
         self.queue.extend(cmds);
         Ok(())
     }
     
     pub fn execute(&mut self, field: &mut AgentField, config: &mut KernelConfig) {
         // Drain + iterasi — hindari alloc
-        for cmd in self.queue.drain(..) {
+        // We need to collect the drained commands first or process batch commands differently
+        // to avoid mutable borrow alias
+        let cmds = std::mem::take(&mut self.queue);
+        for cmd in cmds {
             match cmd {
                 Command::Spawn { x, y, vx, vy, health, color: _ } => {
                     let idx = field.spawn(x, y, health);
