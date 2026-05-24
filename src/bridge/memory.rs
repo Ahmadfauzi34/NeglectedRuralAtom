@@ -1,5 +1,5 @@
 use wasm_bindgen::prelude::*;
-use crate::field::{AgentField, KernelConfig, step_agents};
+use crate::field::{AgentField, KernelConfig, step_agents, SpatialGrid};
 use crate::command::CommandBus;
 use crate::render::{CanvasEncoder, agent_renderer::encode_agents, GpuBuffer};
 
@@ -12,6 +12,7 @@ pub struct KernelBridge {
     render_ptr: *const u8,
     render_len: usize,
     gpu_buffer: GpuBuffer,
+    spatial_grid: SpatialGrid,
 }
 
 #[wasm_bindgen]
@@ -29,6 +30,7 @@ impl KernelBridge {
             render_ptr: std::ptr::null(),
             render_len: 0,
             gpu_buffer: GpuBuffer::new(max_agents),
+            spatial_grid: SpatialGrid::new(80.0), // Initial default size
         }
     }
     
@@ -64,7 +66,7 @@ impl KernelBridge {
     
     pub fn step(&mut self) {
         self.cmd_bus.execute(&mut self.field, &mut self.config);
-        step_agents(&mut self.field, &self.config);
+        step_agents(&mut self.field, &self.config, &mut self.spatial_grid);
 
         // Classic CPU Canvas Rendering
         encode_agents(&mut self.encoder, &self.field, 0xFF6366F1);
