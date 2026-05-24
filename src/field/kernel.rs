@@ -1,4 +1,5 @@
 use super::soa::AgentField;
+use super::spatial_grid::SpatialGrid;
 
 /// Config untuk kernel — internal Rust, tidak di-expose ke JS
 /// (parameter di-pass via primitive di KernelBridge::set_config)
@@ -28,7 +29,7 @@ impl Default for KernelConfig {
 }
 
 /// Step simulation — hot path, zero allocation, branchless where possible
-pub fn step_agents(field: &mut AgentField, config: &KernelConfig) {
+pub fn step_agents(field: &mut AgentField, config: &KernelConfig, grid: &mut SpatialGrid) {
     let count = field.len;
     if count == 0 { return; }
     
@@ -38,10 +39,22 @@ pub fn step_agents(field: &mut AgentField, config: &KernelConfig) {
     let inf_r = config.influence_radius;
     let inf_r_sq = inf_r * inf_r;
     
+    grid.set_cell_size(inf_r);
+    grid.clear();
+
+    for i in 0..count {
+        if field.active[i] == 1 {
+            grid.insert(field.pos_x[i], field.pos_y[i], i);
+        }
+    }
+
     // Pre-alloc accumulators di stack (bukan heap) — fixed size untuk branchless
     let mut acc_x = vec![0.0f32; count]; // ini alloc tapi di luar hot loop
     let mut acc_y = vec![0.0f32; count]; // untuk production, pakai pre-allocated scratch buffer
     
+    // Scratch buffer for neighbor querying to avoid per-agent allocation
+    let mut neighbors_buf = Vec::with_capacity(64);
+
     // === PASS 1: Field influence computation (continuous query) ===
     for i in 0..count {
         if field.active[i] == 0 { continue; }
@@ -57,7 +70,9 @@ pub fn step_agents(field: &mut AgentField, config: &KernelConfig) {
         let mut coh_y = 0.0f32;
         let mut neighbors = 0u32;
         
-        for j in 0..count {
+        grid.query_neighbors(px, py, inf_r, &mut neighbors_buf);
+
+        for &j in &neighbors_buf {
             if i == j || field.active[j] == 0 { continue; }
             
             let dx = field.pos_x[j] - px;
