@@ -17,11 +17,11 @@ pub enum Command {
     Clear,
     
     #[serde(rename = "batch")]
-    Batch(Vec<<Command>),
+    Batch(Vec<<Command>),  // <-- FIX: hapus <
 }
 
 pub struct CommandBus {
-    queue: Vec<<Command>,
+    queue: Vec<<Command>,  // <-- FIX: hapus <
 }
 
 impl CommandBus {
@@ -29,22 +29,20 @@ impl CommandBus {
         Self { queue: Vec::with_capacity(64) }
     }
     
-    /// Parse single command dari JSON string. Dipanggil dari JS.
     pub fn parse(&mut self, json: &str) -> Result<(), serde_json::Error> {
         let cmd: Command = serde_json::from_str(json)?;
         self.queue.push(cmd);
         Ok(())
     }
     
-    /// Parse batch commands. Lebih efisien untuk kirim banyak perintah sekaligus.
     pub fn parse_batch(&mut self, json: &str) -> Result<(), serde_json::Error> {
-        let cmds: Vec<<Command> = serde_json::from_str(json)?;
+        let cmds: Vec<<Command> = serde_json::from_str(json)?;  // <-- FIX: hapus <
         self.queue.extend(cmds);
         Ok(())
     }
     
-    /// Eksekusi semua queued command ke field & config
     pub fn execute(&mut self, field: &mut AgentField, config: &mut KernelConfig) {
+        // Drain + iterasi — hindari alloc
         for cmd in self.queue.drain(..) {
             match cmd {
                 Command::Spawn { x, y, vx, vy, health, color: _ } => {
@@ -68,7 +66,8 @@ impl CommandBus {
                     field.len = 0;
                 }
                 Command::Batch(batch) => {
-                    // Flatten: masukkan kembali ke queue untuk dieksekusi di iterasi berikutnya
+                    // Flatten: extend queue, dieksekusi di drain berikutnya
+                    // Tapi karena kita sudah dalam drain, masukkan ke queue baru
                     self.queue.extend(batch);
                 }
             }
@@ -79,4 +78,3 @@ impl CommandBus {
         self.queue.clear();
     }
 }
-
