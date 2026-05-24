@@ -2,6 +2,7 @@ mod field;
 mod bridge;
 mod command;
 mod render;
+pub mod scripting;
 
 use wasm_bindgen::prelude::*;
 

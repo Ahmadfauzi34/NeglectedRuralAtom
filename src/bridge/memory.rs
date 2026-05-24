@@ -2,6 +2,7 @@ use wasm_bindgen::prelude::*;
 use crate::field::{AgentField, KernelConfig, step_agents, SpatialGrid};
 use crate::command::CommandBus;
 use crate::render::{CanvasEncoder, agent_renderer::encode_agents, GpuBuffer};
+use crate::scripting::ScriptEngine;
 
 #[wasm_bindgen]
 pub struct KernelBridge {
@@ -13,6 +14,7 @@ pub struct KernelBridge {
     render_len: usize,
     gpu_buffer: GpuBuffer,
     spatial_grid: SpatialGrid,
+    script_engine: ScriptEngine,
 }
 
 #[wasm_bindgen]
@@ -31,6 +33,7 @@ impl KernelBridge {
             render_len: 0,
             gpu_buffer: GpuBuffer::new(max_agents),
             spatial_grid: SpatialGrid::new(80.0), // Initial default size
+            script_engine: ScriptEngine::new(),
         }
     }
     
@@ -46,6 +49,14 @@ impl KernelBridge {
         }
     }
     
+    /// Evaluates a dynamic LLM-generated script against the WASM engine.
+    pub fn eval_llm_script(&mut self, script: &str) -> String {
+        match self.script_engine.eval(script) {
+            Ok(res) => res,
+            Err(e) => e,
+        }
+    }
+
     pub fn spawn(&mut self, x: f32, y: f32, health: f32) -> usize {
         self.field.spawn(x, y, health)
     }
