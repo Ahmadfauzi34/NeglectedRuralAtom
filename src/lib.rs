@@ -3,6 +3,7 @@ mod bridge;
 mod command;
 mod render;
 pub mod scripting;
+pub mod dom;
 
 use wasm_bindgen::prelude::*;
 

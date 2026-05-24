@@ -1,5 +1,6 @@
 use rhai::{Engine, Scope, Dynamic, CustomType};
 use crate::field::AgentField;
+use crate::dom::DomContext;
 
 /// Safe sandboxed environment to evaluate dynamic scripts (e.g. from LLM).
 pub struct ScriptEngine {
@@ -64,8 +65,9 @@ impl FieldContext {
     }
 
     pub fn kill(&mut self, idx: i64) {
-        if idx >= 0 {
-            self.get_field().kill_swap(idx as usize);
+        let field = self.get_field();
+        if idx >= 0 && (idx as usize) < field.len {
+            field.kill_swap(idx as usize);
         }
     }
 }
@@ -86,6 +88,32 @@ impl ScriptEngine {
         engine.register_fn("set_velocity", FieldContext::set_velocity);
         engine.register_fn("spawn", FieldContext::spawn);
         engine.register_fn("kill", FieldContext::kill);
+
+        // --- DOM MANIPULATION APIS FOR RHAI ---
+
+        engine.register_fn("dom_append_html", |target_id: &str, html: &str| -> Result<(), String> {
+            if let Some(dom) = DomContext::new() {
+                dom.append_html(target_id, html)
+            } else {
+                Err("DOM Context unavailable".to_string())
+            }
+        });
+
+        engine.register_fn("dom_set_inner_html", |target_id: &str, html: &str| -> Result<(), String> {
+            if let Some(dom) = DomContext::new() {
+                dom.set_inner_html(target_id, html)
+            } else {
+                Err("DOM Context unavailable".to_string())
+            }
+        });
+
+        engine.register_fn("dom_set_text", |target_id: &str, text: &str| -> Result<(), String> {
+            if let Some(dom) = DomContext::new() {
+                dom.set_text_content(target_id, text)
+            } else {
+                Err("DOM Context unavailable".to_string())
+            }
+        });
 
         // We can still keep utility functions
         engine.register_fn("render_html_card", |title: &str, content: &str| -> String {
