@@ -1,20 +1,31 @@
 use wasm_bindgen::prelude::*;
+use std::sync::{Arc, RwLock};
+
 use crate::field::{AgentField, KernelConfig, step_agents, SpatialGrid};
 use crate::command::CommandBus;
 use crate::render::{CanvasEncoder, agent_renderer::encode_agents, GpuBuffer};
 use crate::scripting::ScriptEngine;
+use crate::prompt::PromptBuilder;
+
+/// Represents the shared internal state of the simulation.
+/// Wrapped in Arc<RwLock> to allow async tasks (like LLM fetch)
+/// to read the state safely without blocking rendering.
+pub struct SharedState {
+    pub field: AgentField,
+    pub config: KernelConfig,
+    pub spatial_grid: SpatialGrid,
+}
 
 #[wasm_bindgen]
 pub struct KernelBridge {
-    field: AgentField,
-    config: KernelConfig,
+    state: Arc<RwLock<SharedState>>,
     cmd_bus: CommandBus,
     encoder: CanvasEncoder,
     render_ptr: *const u8,
     render_len: usize,
     gpu_buffer: GpuBuffer,
-    spatial_grid: SpatialGrid,
     script_engine: ScriptEngine,
+    prompt_builder: PromptBuilder,
 }
 
 #[wasm_bindgen]
@@ -24,16 +35,21 @@ impl KernelBridge {
         let mut field = AgentField::new(max_agents);
         field.reserve(max_agents);
         
-        Self {
+        let state = SharedState {
             field,
             config: KernelConfig::default(),
+            spatial_grid: SpatialGrid::new(80.0),
+        };
+
+        Self {
+            state: Arc::new(RwLock::new(state)),
             cmd_bus: CommandBus::new(),
             encoder: CanvasEncoder::new(max_agents * 2 + 64),
             render_ptr: std::ptr::null(),
             render_len: 0,
             gpu_buffer: GpuBuffer::new(max_agents),
-            spatial_grid: SpatialGrid::new(80.0), // Initial default size
             script_engine: ScriptEngine::new(),
+            prompt_builder: PromptBuilder::new(10_000), // Pre-allocate 10KB string buffer
         }
     }
     
@@ -51,42 +67,62 @@ impl KernelBridge {
     
     /// Evaluates a dynamic LLM-generated script against the WASM engine.
     pub fn eval_llm_script(&mut self, script: &str) -> String {
-        match self.script_engine.eval(script, &mut self.field) {
+        let mut state = self.state.write().unwrap();
+        match self.script_engine.eval(script, &mut state.field) {
             Ok(res) => res,
             Err(e) => e,
         }
     }
 
+    /// Asynchronously builds a prompt string containing the active agent states,
+    /// simulating an async workflow where we format memory without blocking the UI.
+    pub async fn generate_llm_prompt(&mut self) -> String {
+        // Read lock to safely read state concurrently.
+        let state = self.state.read().unwrap();
+        self.prompt_builder.build_agent_state_prompt(&state.field).to_string()
+    }
+
     pub fn spawn(&mut self, x: f32, y: f32, health: f32) -> usize {
-        self.field.spawn(x, y, health)
+        let mut state = self.state.write().unwrap();
+        state.field.spawn(x, y, health)
     }
     
     pub fn kill(&mut self, idx: usize) {
-        self.field.kill_swap(idx);
+        let mut state = self.state.write().unwrap();
+        state.field.kill_swap(idx);
     }
     
     pub fn set_config(&mut self, dt: f32, friction: f32, max_speed: f32, influence_radius: f32) {
-        self.config = KernelConfig {
+        let mut state = self.state.write().unwrap();
+        state.config = KernelConfig {
             dt,
             friction,
             max_speed,
             influence_radius,
-            ..self.config
+            ..state.config
         };
     }
     
     pub fn step(&mut self) {
-        self.cmd_bus.execute(&mut self.field, &mut self.config);
-        step_agents(&mut self.field, &self.config, &mut self.spatial_grid);
+        let mut state = self.state.write().unwrap();
+
+        // Destructure state to avoid borrow checker conflicts
+        let SharedState { field, config, spatial_grid } = &mut *state;
+
+        // Execute pending commands
+        self.cmd_bus.execute(field, config);
+
+        // Step physics and AI
+        step_agents(field, config, spatial_grid);
 
         // Classic CPU Canvas Rendering
-        encode_agents(&mut self.encoder, &self.field, 0xFF6366F1);
+        encode_agents(&mut self.encoder, field, 0xFF6366F1);
         let (ptr, len) = self.encoder.encode();
         self.render_ptr = ptr;
         self.render_len = len;
 
         // Zero-copy Instanced Buffer Rendering for WebGL
-        self.gpu_buffer.update(&self.field);
+        self.gpu_buffer.update(field);
     }
 
     #[wasm_bindgen(getter)]
@@ -111,17 +147,24 @@ impl KernelBridge {
     
     #[wasm_bindgen(getter)]
     pub fn agent_count(&self) -> usize {
-        self.field.agent_count()
+        let state = self.state.read().unwrap();
+        state.field.agent_count()
     }
     
     #[wasm_bindgen(getter)]
     pub fn pos_x_ptr(&self) -> *const f32 {
-        self.field.pos_x_ptr()
+        // Warning: Exposing raw pointers to a lock-protected struct is inherently risky
+        // if JS accesses them while a Write lock is held or if a reallocation occurs.
+        // As long as SOA buffer is pre-allocated and JS only reads during idle time, it's safe.
+        // WebAssembly linear memory does not move unless the Vec reallocates.
+        let state = self.state.read().unwrap();
+        state.field.pos_x_ptr()
     }
     
     #[wasm_bindgen(getter)]
     pub fn pos_y_ptr(&self) -> *const f32 {
-        self.field.pos_y_ptr()
+        let state = self.state.read().unwrap();
+        state.field.pos_y_ptr()
     }
 }
 
