@@ -36,8 +36,8 @@ impl FieldContext {
 
     pub fn get_x(&mut self, idx: i64) -> f32 {
         let field = self.get_field();
-        if idx >= 0 && (idx as usize) < field.len {
-            field.pos_x[idx as usize]
+        if idx >= 0 {
+            field.pos_x.get(idx as usize).copied().unwrap_or(0.0)
         } else {
             0.0
         }
@@ -45,8 +45,8 @@ impl FieldContext {
 
     pub fn get_y(&mut self, idx: i64) -> f32 {
         let field = self.get_field();
-        if idx >= 0 && (idx as usize) < field.len {
-            field.pos_y[idx as usize]
+        if idx >= 0 {
+            field.pos_y.get(idx as usize).copied().unwrap_or(0.0)
         } else {
             0.0
         }
@@ -54,9 +54,12 @@ impl FieldContext {
 
     pub fn set_velocity(&mut self, idx: i64, vx: f32, vy: f32) {
         let field = self.get_field();
-        if idx >= 0 && (idx as usize) < field.len {
-            field.vel_x[idx as usize] = vx;
-            field.vel_y[idx as usize] = vy;
+        if idx >= 0 {
+            let u_idx = idx as usize;
+            if let (Some(vx_ref), Some(vy_ref)) = (field.vel_x.get_mut(u_idx), field.vel_y.get_mut(u_idx)) {
+                *vx_ref = vx;
+                *vy_ref = vy;
+            }
         }
     }
 

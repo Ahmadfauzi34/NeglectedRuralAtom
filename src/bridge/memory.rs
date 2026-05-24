@@ -74,9 +74,9 @@ impl KernelBridge {
         }
     }
 
-    /// Asynchronously builds a prompt string containing the active agent states,
-    /// simulating an async workflow where we format memory without blocking the UI.
-    pub async fn generate_llm_prompt(&mut self) -> String {
+    /// Builds a prompt string containing the active agent states.
+    /// This runs synchronously but is heavily optimized via zero-allocation string builders.
+    pub fn generate_llm_prompt(&mut self) -> String {
         // Read lock to safely read state concurrently.
         let state = self.state.read().unwrap();
         self.prompt_builder.build_agent_state_prompt(&state.field).to_string()
