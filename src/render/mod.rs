@@ -28,6 +28,9 @@ pub struct DrawCmd {
 }
 
 pub mod agent_renderer;  // <-- TAMBAHKAN INI
+pub mod gpu_buffer;
+
+pub use gpu_buffer::GpuBuffer;
 
 pub struct CanvasEncoder {
     cmds: Vec<DrawCmd>,      // <-- FIX: hapus <

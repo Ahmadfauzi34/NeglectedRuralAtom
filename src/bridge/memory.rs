@@ -1,7 +1,7 @@
 use wasm_bindgen::prelude::*;
 use crate::field::{AgentField, KernelConfig, step_agents};
 use crate::command::CommandBus;
-use crate::render::{CanvasEncoder, agent_renderer::encode_agents};
+use crate::render::{CanvasEncoder, agent_renderer::encode_agents, GpuBuffer};
 
 #[wasm_bindgen]
 pub struct KernelBridge {
@@ -11,6 +11,7 @@ pub struct KernelBridge {
     encoder: CanvasEncoder,
     render_ptr: *const u8,
     render_len: usize,
+    gpu_buffer: GpuBuffer,
 }
 
 #[wasm_bindgen]
@@ -27,6 +28,7 @@ impl KernelBridge {
             encoder: CanvasEncoder::new(max_agents * 2 + 64),
             render_ptr: std::ptr::null(),
             render_len: 0,
+            gpu_buffer: GpuBuffer::new(max_agents),
         }
     }
     
@@ -63,10 +65,25 @@ impl KernelBridge {
     pub fn step(&mut self) {
         self.cmd_bus.execute(&mut self.field, &mut self.config);
         step_agents(&mut self.field, &self.config);
+
+        // Classic CPU Canvas Rendering
         encode_agents(&mut self.encoder, &self.field, 0xFF6366F1);
         let (ptr, len) = self.encoder.encode();
         self.render_ptr = ptr;
         self.render_len = len;
+
+        // Zero-copy Instanced Buffer Rendering for WebGL
+        self.gpu_buffer.update(&self.field);
+    }
+
+    #[wasm_bindgen(getter)]
+    pub fn gpu_buffer_ptr(&self) -> *const f32 {
+        self.gpu_buffer.ptr()
+    }
+
+    #[wasm_bindgen(getter)]
+    pub fn gpu_buffer_len(&self) -> usize {
+        self.gpu_buffer.len()
     }
     
     #[wasm_bindgen(getter)]
