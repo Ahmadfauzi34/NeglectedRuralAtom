@@ -11,8 +11,7 @@ crate-type = ["cdylib", "rlib"]
 [dependencies]
 wasm-bindgen = "0.2"
 js-sys = "0.3"
-# wee_alloc untuk ukuran kecil, tapi hati-hati dengan fragmentasi
-# untuk production yang alloc-intensif, pertimbangkan custom allocator
+console_error_panic_hook = "0.1"  # <-- TAMBAHKAN INI
 wee_alloc = { version = "0.4", optional = true }
 
 [dependencies.web-sys]
