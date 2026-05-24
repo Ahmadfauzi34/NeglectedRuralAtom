@@ -1,0 +1,34 @@
+[package]
+name = "agentic-kernel"
+version = "0.1.0"
+edition = "2021"
+authors = ["You"]
+description = "SOA field-based agentic kernel for WASM"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+wasm-bindgen = "0.2"
+js-sys = "0.3"
+# wee_alloc untuk ukuran kecil, tapi hati-hati dengan fragmentasi
+# untuk production yang alloc-intensif, pertimbangkan custom allocator
+wee_alloc = { version = "0.4", optional = true }
+
+[dependencies.web-sys]
+version = "0.3"
+features = [
+  "console",
+  "Performance",
+  "Window",
+]
+
+[profile.release]
+opt-level = 3        # maksimal optimasi
+lto = true             # link-time optimization
+codegen-units = 1      # satu unit untuk optimasi lebih agresif
+panic = "abort"        # tidak unwind — lebih kecil & cepat
+strip = true           # strip symbol
+
+[features]
+default = ["wee_alloc"]
