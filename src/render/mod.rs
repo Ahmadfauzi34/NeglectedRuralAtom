@@ -1,8 +1,7 @@
-use wasm_bindgen::prelude::*;
+
 
 pub const DRAW_VERSION: u32 = 1;
 
-// Tags — TS tidak hardcode makna, hanya switch pada angka
 pub const TAG_CIRCLE: u32 = 0;
 pub const TAG_LINE: u32 = 1;
 pub const TAG_POLY: u32 = 2;
@@ -18,21 +17,22 @@ pub struct DrawHeader {
 
 #[repr(C)]
 pub struct DrawCmd {
-    pub tag: u32,        // 0=circle, 1=line, dll
-    pub color: u32,      // 0xRRGGBBAA
+    pub tag: u32,
+    pub color: u32,
     pub x: f32,
     pub y: f32,
-    pub z: f32,          // semantic tergantung tag (radius, x2, width)
-    pub w: f32,          // semantic tergantung tag (height, y2)
-    pub payload_idx: u32,// offset ke payload buffer (untuk variable data seperti polygon points)
-    pub payload_len: u32,// jumlah item di payload
+    pub z: f32,
+    pub w: f32,
+    pub payload_idx: u32,
+    pub payload_len: u32,
 }
 
-/// Ring buffer encoder. Tidak alloc di hot path karena pakai Vec dengan capacity.
+pub mod agent_renderer;  // <-- TAMBAHKAN INI
+
 pub struct CanvasEncoder {
-    cmds: Vec<<DrawCmd>,
+    cmds: Vec<<DrawCmd>,      // <-- FIX: hapus <
     payload: Vec<u8>,
-    flat: Vec<u8>, // reusable output buffer
+    flat: Vec<u8>,
 }
 
 impl CanvasEncoder {
@@ -86,8 +86,6 @@ impl CanvasEncoder {
         });
     }
     
-    /// Flatten semua command ke continuous byte buffer. Return (ptr, len).
-    /// Buffer valid sampai encode() berikutnya dipanggil.
     pub fn encode(&mut self) -> (*const u8, usize) {
         self.flat.clear();
         
@@ -117,4 +115,3 @@ impl CanvasEncoder {
         (self.flat.as_ptr(), self.flat.len())
     }
 }
-
