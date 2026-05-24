@@ -1,6 +1,7 @@
 use super::soa::AgentField;
 
-#[wasm_bindgen]
+/// Config untuk kernel — internal Rust, tidak di-expose ke JS
+/// (parameter di-pass via primitive di KernelBridge::set_config)
 #[derive(Clone, Copy)]
 pub struct KernelConfig {
     pub dt: f32,
@@ -42,7 +43,6 @@ pub fn step_agents(field: &mut AgentField, config: &KernelConfig) {
     let mut acc_y = vec![0.0f32; count]; // untuk production, pakai pre-allocated scratch buffer
     
     // === PASS 1: Field influence computation (continuous query) ===
-    // Nested loop tapi dengan early-out via distance check (masih cheaper daripada spatial hash untuk <500 agents)
     for i in 0..count {
         if field.active[i] == 0 { continue; }
         
@@ -65,7 +65,6 @@ pub fn step_agents(field: &mut AgentField, config: &KernelConfig) {
             let dist_sq = dx * dx + dy * dy;
             
             // Branchless: gunakan mask alih-alih if
-            // Kalau dist_sq > inf_r_sq, influence = 0 (tetapi tetap dihitung — SIMD-friendly)
             let in_range = (dist_sq <= inf_r_sq) as i32 as f32; // 1.0 atau 0.0
             let inv_dist = in_range / (dist_sq + 1e-6); // epsilon untuk avoid div by zero
             
