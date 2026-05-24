@@ -39,13 +39,7 @@ jobs:
       - name: Build release WASM
         run: wasm-pack build --target web --release --out-dir pkg
 
-      - name: Optimize with wasm-opt (optional but recommended)
-        run: |
-          if command -v wasm-opt &> /dev/null; then
-            wasm-opt -Oz pkg/agentic_kernel_bg.wasm -o pkg/agentic_kernel_bg.wasm
-          else
-            echo "wasm-opt not installed, skipping"
-          fi
+      
 
       - name: List output
         run: |
