@@ -1,8 +1,73 @@
-use rhai::{Engine, Scope, Dynamic};
+use rhai::{Engine, Scope, Dynamic, CustomType};
+use crate::field::AgentField;
 
 /// Safe sandboxed environment to evaluate dynamic scripts (e.g. from LLM).
 pub struct ScriptEngine {
     engine: Engine,
+}
+
+/// A wrapper pointer context to allow Rhai to safely manipulate the SOA AgentField.
+/// Using raw pointer here because Rhai requires types to be `'static + Clone`.
+/// We guarantee safety because the lifetime of this context is strictly bound
+/// to the `eval` function scope.
+#[derive(Clone, CustomType)]
+pub struct FieldContext {
+    ptr: *mut AgentField,
+}
+
+impl FieldContext {
+    pub fn new(field: &mut AgentField) -> Self {
+        Self {
+            ptr: field as *mut AgentField,
+        }
+    }
+
+    #[inline]
+    fn get_field(&mut self) -> &mut AgentField {
+        unsafe { &mut *self.ptr }
+    }
+
+    // --- PRIMITIVE API FOR RHAI ---
+
+    pub fn get_count(&mut self) -> i64 {
+        self.get_field().len as i64
+    }
+
+    pub fn get_x(&mut self, idx: i64) -> f32 {
+        let field = self.get_field();
+        if idx >= 0 && (idx as usize) < field.len {
+            field.pos_x[idx as usize]
+        } else {
+            0.0
+        }
+    }
+
+    pub fn get_y(&mut self, idx: i64) -> f32 {
+        let field = self.get_field();
+        if idx >= 0 && (idx as usize) < field.len {
+            field.pos_y[idx as usize]
+        } else {
+            0.0
+        }
+    }
+
+    pub fn set_velocity(&mut self, idx: i64, vx: f32, vy: f32) {
+        let field = self.get_field();
+        if idx >= 0 && (idx as usize) < field.len {
+            field.vel_x[idx as usize] = vx;
+            field.vel_y[idx as usize] = vy;
+        }
+    }
+
+    pub fn spawn(&mut self, x: f32, y: f32, health: f32) -> i64 {
+        self.get_field().spawn(x, y, health) as i64
+    }
+
+    pub fn kill(&mut self, idx: i64) {
+        if idx >= 0 {
+            self.get_field().kill_swap(idx as usize);
+        }
+    }
 }
 
 impl ScriptEngine {
@@ -11,18 +76,21 @@ impl ScriptEngine {
 
         // --- HARDCODE / PRE-REGISTER APIS FOR LLM TO USE ---
 
-        // Example 1: Rendering HTML string building for agents
+        // Register the FieldContext type so Rhai scripts can use it
+        engine.build_type::<FieldContext>();
+
+        // Register the methods so LLM scripts can actually call them
+        engine.register_fn("get_count", FieldContext::get_count);
+        engine.register_fn("get_x", FieldContext::get_x);
+        engine.register_fn("get_y", FieldContext::get_y);
+        engine.register_fn("set_velocity", FieldContext::set_velocity);
+        engine.register_fn("spawn", FieldContext::spawn);
+        engine.register_fn("kill", FieldContext::kill);
+
+        // We can still keep utility functions
         engine.register_fn("render_html_card", |title: &str, content: &str| -> String {
             format!("<div class='agent-card'><h3>{}</h3><p>{}</p></div>", title, content)
         });
-
-        // Example 2: Lightweight data processing
-        engine.register_fn("process_agent_data", |health: f32, energy: f32| -> f32 {
-            (health * 0.7) + (energy * 0.3)
-        });
-
-        // We can add many utility functions here: regex simulation,
-        // string escaping, mathematical models, state machine evaluations, etc.
 
         // Security limits:
         engine.set_max_operations(10_000); // Prevent infinite loops from bad LLM scripts
@@ -32,9 +100,13 @@ impl ScriptEngine {
     }
 
     /// Evaluates a Rhai script string and returns the resulting String.
-    /// Used when LLM wants to execute logic or generate data on the fly.
-    pub fn eval(&mut self, script: &str) -> Result<String, String> {
+    /// Passes the `AgentField` as a dynamic variable `field` to the script.
+    pub fn eval(&mut self, script: &str, field: &mut AgentField) -> Result<String, String> {
         let mut scope = Scope::new();
+
+        // Push the field context into the scope so the script can access it
+        let ctx = FieldContext::new(field);
+        scope.push("field", ctx);
 
         // Execute the script and format the output as a string to return to JS
         match self.engine.eval_with_scope::<Dynamic>(&mut scope, script) {

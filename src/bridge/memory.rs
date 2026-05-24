@@ -51,7 +51,7 @@ impl KernelBridge {
     
     /// Evaluates a dynamic LLM-generated script against the WASM engine.
     pub fn eval_llm_script(&mut self, script: &str) -> String {
-        match self.script_engine.eval(script) {
+        match self.script_engine.eval(script, &mut self.field) {
             Ok(res) => res,
             Err(e) => e,
         }
