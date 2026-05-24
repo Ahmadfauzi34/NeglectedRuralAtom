@@ -1,8 +1,7 @@
 use wasm_bindgen::prelude::*;
 use crate::field::{AgentField, KernelConfig, step_agents};
-use crate::command::{CommandBus, Command};
-use crate::render::{CanvasEncoder, DrawHeader, DrawCmd};
-use crate::render::agent_renderer::encode_agents;
+use crate::command::CommandBus;
+use crate::render::{CanvasEncoder, agent_renderer::encode_agents};
 
 #[wasm_bindgen]
 pub struct KernelBridge {
@@ -10,8 +9,6 @@ pub struct KernelBridge {
     config: KernelConfig,
     cmd_bus: CommandBus,
     encoder: CanvasEncoder,
-    
-    // Render buffer pointer cache
     render_ptr: *const u8,
     render_len: usize,
 }
@@ -33,23 +30,17 @@ impl KernelBridge {
         }
     }
     
-    // === Command Interface (Agen Bebas Kirim Perintah) ===
-    
-    /// Eksekusi single command dari JSON string.
     pub fn execute_command(&mut self, json: &str) {
         if let Err(e) = self.cmd_bus.parse(json) {
             web_sys::console::error_1(&format!("Command parse error: {:?}", e).into());
         }
     }
     
-    /// Eksekusi batch commands.
     pub fn execute_batch(&mut self, json: &str) {
         if let Err(e) = self.cmd_bus.parse_batch(json) {
             web_sys::console::error_1(&format!("Batch parse error: {:?}", e).into());
         }
     }
-    
-    // === Legacy Spawn (masih bisa dipakai untuk init cepat) ===
     
     pub fn spawn(&mut self, x: f32, y: f32, health: f32) -> usize {
         self.field.spawn(x, y, health)
@@ -69,25 +60,14 @@ impl KernelBridge {
         };
     }
     
-    // === Simulation Step ===
-    
     pub fn step(&mut self) {
-        // 1. Jalankan command queue
         self.cmd_bus.execute(&mut self.field, &mut self.config);
-        
-        // 2. Physics / AI kernel
         step_agents(&mut self.field, &self.config);
-        
-        // 3. Render encoding (SOA → DrawCmd)
-        encode_agents(&mut self.encoder, &self.field, 0xFF6366F1); // default indigo color
-        
-        // 4. Flatten ke buffer
+        encode_agents(&mut self.encoder, &self.field, 0xFF6366F1);
         let (ptr, len) = self.encoder.encode();
         self.render_ptr = ptr;
         self.render_len = len;
     }
-    
-    // === Zero-Copy Render Buffer Access ===
     
     #[wasm_bindgen(getter)]
     pub fn render_ptr(&self) -> *const u8 {
@@ -98,8 +78,6 @@ impl KernelBridge {
     pub fn render_len(&self) -> usize {
         self.render_len
     }
-    
-    // === Legacy direct buffer access (opsional, kalau TS mau baca SOA langsung) ===
     
     #[wasm_bindgen(getter)]
     pub fn agent_count(&self) -> usize {
@@ -117,7 +95,6 @@ impl KernelBridge {
     }
 }
 
-/// MemoryView helpers untuk JS
 #[wasm_bindgen]
 pub struct MemoryView;
 
@@ -131,7 +108,6 @@ impl MemoryView {
         unsafe { js_sys::Uint8Array::view(std::slice::from_raw_parts(ptr, len)) }
     }
     
-    /// Baca u32 dari pointer (little-endian)
     pub fn read_u32(ptr: *const u8) -> u32 {
         unsafe {
             let slice = std::slice::from_raw_parts(ptr, 4);
@@ -139,7 +115,6 @@ impl MemoryView {
         }
     }
     
-    /// Baca f32 dari pointer (little-endian)
     pub fn read_f32(ptr: *const u8) -> f32 {
         unsafe {
             let slice = std::slice::from_raw_parts(ptr, 4);
