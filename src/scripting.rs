@@ -52,6 +52,24 @@ impl FieldContext {
         }
     }
 
+    pub fn get_behavior(&mut self, idx: i64) -> i64 {
+        let field = self.get_field();
+        if idx >= 0 {
+            field.behavior_state.get(idx as usize).copied().unwrap_or(0) as i64
+        } else {
+            0
+        }
+    }
+
+    pub fn set_behavior(&mut self, idx: i64, state: i64) {
+        let field = self.get_field();
+        if idx >= 0 {
+            if let Some(beh) = field.behavior_state.get_mut(idx as usize) {
+                *beh = state as u8;
+            }
+        }
+    }
+
     pub fn set_velocity(&mut self, idx: i64, vx: f32, vy: f32) {
         let field = self.get_field();
         if idx >= 0 {
@@ -205,6 +223,8 @@ impl ScriptEngine {
         engine.register_fn("get_count", FieldContext::get_count);
         engine.register_fn("get_x", FieldContext::get_x);
         engine.register_fn("get_y", FieldContext::get_y);
+        engine.register_fn("get_behavior", FieldContext::get_behavior);
+        engine.register_fn("set_behavior", FieldContext::set_behavior);
         engine.register_fn("set_velocity", FieldContext::set_velocity);
         engine.register_fn("spawn", FieldContext::spawn);
         engine.register_fn("kill", FieldContext::kill);
