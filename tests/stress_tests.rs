@@ -21,6 +21,8 @@ mod dom;
 mod prompt;
 #[path = "../src/business.rs"]
 mod business;
+#[path = "../src/telemetry.rs"]
+mod telemetry;
 
 use bridge::KernelBridge;
 

@@ -6,6 +6,7 @@ use crate::command::CommandBus;
 use crate::render::{CanvasEncoder, agent_renderer::encode_agents, GpuBuffer};
 use crate::scripting::ScriptEngine;
 use crate::prompt::PromptBuilder;
+use crate::telemetry::Telemetry;
 
 /// Represents the shared internal state of the simulation.
 /// Wrapped in Arc<RwLock> to allow async tasks (like LLM fetch)
@@ -31,6 +32,9 @@ pub struct KernelBridge {
     script_engine: ScriptEngine,
     prompt_builder: PromptBuilder,
     use_webgl: bool,
+    // Made internal to avoid wasm_bindgen trait issues with struct exposure.
+    // We will expose it via a getter that returns a JSON string instead.
+    telemetry: Telemetry,
 }
 
 #[wasm_bindgen]
@@ -60,6 +64,7 @@ impl KernelBridge {
             script_engine: ScriptEngine::new(),
             prompt_builder: PromptBuilder::new(max_agents * 128), // 128 bytes roughly covers each agent printout
             use_webgl: false,
+            telemetry: Telemetry::new(),
         }
     }
     
@@ -98,12 +103,19 @@ impl KernelBridge {
 
     /// Evaluates a dynamic LLM-generated script against the WASM engine.
     pub fn eval_llm_script(&mut self, script: &str) -> String {
+        let start_time = Telemetry::start_timer();
+
         let mut state = self.state.write().unwrap();
         let SharedState { field, workers, messages, env_grid, vector_mem, .. } = &mut *state;
-        match self.script_engine.eval(script, field, workers, messages, env_grid, vector_mem) {
+        let metrics_copy = self.telemetry.metrics.clone();
+
+        let result = match self.script_engine.eval(script, field, workers, messages, env_grid, vector_mem, metrics_copy) {
             Ok(res) => res,
             Err(e) => e,
-        }
+        };
+
+        self.telemetry.record_script_eval(start_time);
+        result
     }
 
     /// Builds a prompt string containing the active agent states.
@@ -163,7 +175,15 @@ impl KernelBridge {
     }
     
     pub fn step(&mut self) {
+        let start_time = Telemetry::start_timer();
         let mut state = self.state.write().unwrap();
+
+        // Record structural counts into telemetry
+        self.telemetry.metrics.active_physics_agents = state.field.agent_count();
+        self.telemetry.metrics.active_data_workers = state.workers.len - state.workers.free_slots.len();
+        self.telemetry.metrics.text_arena_bytes = state.workers.text_arena.len();
+        self.telemetry.metrics.total_messages = state.messages.len;
+        self.telemetry.metrics.memory_vector_count = state.vector_mem.len;
 
         // Destructure state to avoid borrow checker conflicts
         let SharedState { field, workers: _, messages: _, env_grid, vector_mem: _, config, spatial_grid } = &mut *state;
@@ -188,6 +208,8 @@ impl KernelBridge {
             self.render_ptr = ptr;
             self.render_len = len;
         }
+
+        self.telemetry.record_physics_step(start_time);
     }
 
     #[wasm_bindgen(getter)]
@@ -230,6 +252,11 @@ impl KernelBridge {
     pub fn pos_y_ptr(&self) -> *const f32 {
         let state = self.state.read().unwrap();
         state.field.pos_y_ptr()
+    }
+
+    /// Exposes a serialized JSON of the engine metrics to Javascript
+    pub fn get_metrics_json(&self) -> String {
+        self.telemetry.get_metrics_json()
     }
 }
 

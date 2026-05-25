@@ -6,6 +6,7 @@ pub mod scripting;
 pub mod dom;
 pub mod prompt;
 pub mod business;
+pub mod telemetry;
 
 use wasm_bindgen::prelude::*;
 

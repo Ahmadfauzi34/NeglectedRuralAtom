@@ -2,6 +2,7 @@ use rhai::{Engine, Scope, Dynamic, CustomType, Array};
 use crate::field::{AgentField, DataWorkerField, MessageBus, EnvironmentGrid, vector_memory::VectorMemory, BROADCAST_ID};
 use crate::dom::DomContext;
 use crate::business;
+use crate::telemetry::EngineMetrics;
 
 /// Safe sandboxed environment to evaluate dynamic scripts (e.g. from LLM).
 pub struct ScriptEngine {
@@ -421,6 +422,13 @@ impl ScriptEngine {
         engine.register_fn("regex_extract_all", business::regex_extract_all);
         engine.register_fn("sum_number_strings", business::sum_number_strings);
 
+        // --- TELEMETRY APIS FOR RHAI ---
+        engine.build_type::<EngineMetrics>();
+        engine.register_fn("get_physics_ms", |m: &mut EngineMetrics| -> f64 { m.physics_step_ms });
+        engine.register_fn("get_script_ms", |m: &mut EngineMetrics| -> f64 { m.scripting_eval_ms });
+        engine.register_fn("get_active_workers", |m: &mut EngineMetrics| -> i64 { m.active_data_workers as i64 });
+        engine.register_fn("get_arena_bytes", |m: &mut EngineMetrics| -> i64 { m.text_arena_bytes as i64 });
+
         // We can still keep utility functions
         engine.register_fn("render_html_card", |title: &str, content: &str| -> String {
             format!("<div class='agent-card'><h3>{}</h3><p>{}</p></div>", title, content)
@@ -435,7 +443,7 @@ impl ScriptEngine {
 
     /// Evaluates a Rhai script string and returns the resulting String.
     /// Passes the contexts as dynamic variables to the script.
-    pub fn eval(&mut self, script: &str, field: &mut AgentField, workers: &mut DataWorkerField, messages: &mut MessageBus, env_grid: &mut EnvironmentGrid, vector_mem: &mut VectorMemory) -> Result<String, String> {
+    pub fn eval(&mut self, script: &str, field: &mut AgentField, workers: &mut DataWorkerField, messages: &mut MessageBus, env_grid: &mut EnvironmentGrid, vector_mem: &mut VectorMemory, metrics: EngineMetrics) -> Result<String, String> {
         let mut scope = Scope::new();
 
         // Push the contexts into the scope so the script can access them
@@ -449,6 +457,7 @@ impl ScriptEngine {
         scope.push("messages", m_ctx);
         scope.push("env_grid", e_ctx);
         scope.push("vector_mem", v_ctx);
+        scope.push("metrics", metrics);
 
         // Execute the script and format the output as a string to return to JS
         match self.engine.eval_with_scope::<Dynamic>(&mut scope, script) {
