@@ -1,7 +1,7 @@
 use wasm_bindgen::prelude::*;
 use std::sync::{Arc, RwLock};
 
-use crate::field::{AgentField, KernelConfig, step_agents, SpatialGrid};
+use crate::field::{AgentField, KernelConfig, step_agents, SpatialGrid, DataWorkerField};
 use crate::command::CommandBus;
 use crate::render::{CanvasEncoder, agent_renderer::encode_agents, GpuBuffer};
 use crate::scripting::ScriptEngine;
@@ -12,6 +12,7 @@ use crate::prompt::PromptBuilder;
 /// to read the state safely without blocking rendering.
 pub struct SharedState {
     pub field: AgentField,
+    pub workers: DataWorkerField,
     pub config: KernelConfig,
     pub spatial_grid: SpatialGrid,
 }
@@ -37,6 +38,7 @@ impl KernelBridge {
         
         let state = SharedState {
             field,
+            workers: DataWorkerField::new(max_agents),
             config: KernelConfig::default(),
             spatial_grid: SpatialGrid::new(80.0),
         };
@@ -68,7 +70,8 @@ impl KernelBridge {
     /// Evaluates a dynamic LLM-generated script against the WASM engine.
     pub fn eval_llm_script(&mut self, script: &str) -> String {
         let mut state = self.state.write().unwrap();
-        match self.script_engine.eval(script, &mut state.field) {
+        let SharedState { field, workers, .. } = &mut *state;
+        match self.script_engine.eval(script, field, workers) {
             Ok(res) => res,
             Err(e) => e,
         }
@@ -107,7 +110,7 @@ impl KernelBridge {
         let mut state = self.state.write().unwrap();
 
         // Destructure state to avoid borrow checker conflicts
-        let SharedState { field, config, spatial_grid } = &mut *state;
+        let SharedState { field, workers: _, config, spatial_grid } = &mut *state;
 
         // Execute pending commands
         self.cmd_bus.execute(field, config);

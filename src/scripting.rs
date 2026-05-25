@@ -1,5 +1,5 @@
 use rhai::{Engine, Scope, Dynamic, CustomType};
-use crate::field::AgentField;
+use crate::field::{AgentField, DataWorkerField};
 use crate::dom::DomContext;
 
 /// Safe sandboxed environment to evaluate dynamic scripts (e.g. from LLM).
@@ -75,6 +75,55 @@ impl FieldContext {
     }
 }
 
+/// A wrapper pointer context to allow Rhai to safely manipulate Data Worker Agents.
+#[derive(Clone, CustomType)]
+pub struct WorkerContext {
+    ptr: *mut DataWorkerField,
+}
+
+impl WorkerContext {
+    pub fn new(workers: &mut DataWorkerField) -> Self {
+        Self {
+            ptr: workers as *mut DataWorkerField,
+        }
+    }
+
+    #[inline]
+    fn get_workers(&mut self) -> &mut DataWorkerField {
+        unsafe { &mut *self.ptr }
+    }
+
+    pub fn spawn_worker(&mut self, task_id: i64, payload: &str) -> i64 {
+        self.get_workers().spawn_worker(task_id as u32, payload) as i64
+    }
+
+    pub fn get_worker_state(&mut self, idx: i64) -> i64 {
+        let workers = self.get_workers();
+        if idx >= 0 {
+            workers.states.get(idx as usize).copied().unwrap_or(0) as i64
+        } else {
+            0
+        }
+    }
+
+    pub fn get_worker_payload(&mut self, idx: i64) -> String {
+        let workers = self.get_workers();
+        if idx >= 0 && (idx as usize) < workers.len {
+            workers.payloads[idx as usize].clone()
+        } else {
+            String::new()
+        }
+    }
+
+    pub fn set_worker_result(&mut self, idx: i64, result: &str) {
+        let workers = self.get_workers();
+        if idx >= 0 && (idx as usize) < workers.len {
+            workers.results[idx as usize] = result.to_string();
+            workers.states[idx as usize] = 2; // Done
+        }
+    }
+}
+
 impl ScriptEngine {
     pub fn new() -> Self {
         let mut engine = Engine::new();
@@ -91,6 +140,13 @@ impl ScriptEngine {
         engine.register_fn("set_velocity", FieldContext::set_velocity);
         engine.register_fn("spawn", FieldContext::spawn);
         engine.register_fn("kill", FieldContext::kill);
+
+        // --- WORKER AGENT APIS FOR RHAI ---
+        engine.build_type::<WorkerContext>();
+        engine.register_fn("spawn_worker", WorkerContext::spawn_worker);
+        engine.register_fn("get_worker_state", WorkerContext::get_worker_state);
+        engine.register_fn("get_worker_payload", WorkerContext::get_worker_payload);
+        engine.register_fn("set_worker_result", WorkerContext::set_worker_result);
 
         // --- DOM MANIPULATION APIS FOR RHAI ---
 
@@ -131,13 +187,15 @@ impl ScriptEngine {
     }
 
     /// Evaluates a Rhai script string and returns the resulting String.
-    /// Passes the `AgentField` as a dynamic variable `field` to the script.
-    pub fn eval(&mut self, script: &str, field: &mut AgentField) -> Result<String, String> {
+    /// Passes the `AgentField` and `DataWorkerField` as dynamic variables to the script.
+    pub fn eval(&mut self, script: &str, field: &mut AgentField, workers: &mut DataWorkerField) -> Result<String, String> {
         let mut scope = Scope::new();
 
-        // Push the field context into the scope so the script can access it
-        let ctx = FieldContext::new(field);
-        scope.push("field", ctx);
+        // Push the contexts into the scope so the script can access them
+        let f_ctx = FieldContext::new(field);
+        let w_ctx = WorkerContext::new(workers);
+        scope.push("field", f_ctx);
+        scope.push("workers", w_ctx);
 
         // Execute the script and format the output as a string to return to JS
         match self.engine.eval_with_scope::<Dynamic>(&mut scope, script) {
