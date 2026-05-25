@@ -116,6 +116,23 @@ impl WorkerContext {
         self.get_workers().spawn_worker(task_id as u32, payload) as i64
     }
 
+    /// Allows LLM scripts to recursively assign batch tasks to free workers.
+    pub fn spawn_workers_batch(&mut self, task_id: i64, payloads: Array) -> i64 {
+        let workers = self.get_workers();
+        let mut spawned_count = 0;
+
+        for dyn_val in payloads {
+            if let Ok(payload_str) = dyn_val.into_string() {
+                if workers.spawn_worker(task_id as u32, &payload_str) == -1 {
+                    break; // Buffer is full
+                }
+                spawned_count += 1;
+            }
+        }
+
+        spawned_count
+    }
+
     pub fn get_worker_state(&mut self, idx: i64) -> i64 {
         let workers = self.get_workers();
         if idx >= 0 {
@@ -331,6 +348,7 @@ impl ScriptEngine {
         // --- WORKER AGENT APIS FOR RHAI ---
         engine.build_type::<WorkerContext>();
         engine.register_fn("spawn_worker", WorkerContext::spawn_worker);
+        engine.register_fn("spawn_workers_batch", WorkerContext::spawn_workers_batch);
         engine.register_fn("get_worker_state", WorkerContext::get_worker_state);
         engine.register_fn("get_worker_payload", WorkerContext::get_worker_payload);
         engine.register_fn("set_worker_result", WorkerContext::set_worker_result);
