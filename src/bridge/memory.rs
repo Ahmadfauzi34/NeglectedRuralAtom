@@ -75,6 +75,27 @@ impl KernelBridge {
         }
     }
     
+    /// Instantly allocates and distributes tasks mapped from a JSON array of strings
+    /// across idle Data Workers. Avoiding the overhead of sequential bridging.
+    pub fn spawn_workers_batch(&mut self, base_task_id: u32, payloads_json: &str) -> i32 {
+        if let Ok(payloads) = serde_json::from_str::<Vec<String>>(payloads_json) {
+            let mut state = self.state.write().unwrap();
+            let mut spawned_count = 0;
+
+            for payload in payloads {
+                // If it fails to spawn (buffer full), it halts early and returns count
+                if state.workers.spawn_worker(base_task_id, &payload) == -1 {
+                    break;
+                }
+                spawned_count += 1;
+            }
+
+            spawned_count
+        } else {
+            -1 // Parsing error
+        }
+    }
+
     /// Evaluates a dynamic LLM-generated script against the WASM engine.
     pub fn eval_llm_script(&mut self, script: &str) -> String {
         let mut state = self.state.write().unwrap();

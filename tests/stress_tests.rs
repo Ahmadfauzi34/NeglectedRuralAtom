@@ -19,6 +19,8 @@ mod scripting;
 mod dom;
 #[path = "../src/prompt.rs"]
 mod prompt;
+#[path = "../src/business.rs"]
+mod business;
 
 use bridge::KernelBridge;
 

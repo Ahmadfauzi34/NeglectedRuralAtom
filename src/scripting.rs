@@ -1,6 +1,7 @@
 use rhai::{Engine, Scope, Dynamic, CustomType, Array};
 use crate::field::{AgentField, DataWorkerField, MessageBus, EnvironmentGrid, vector_memory::VectorMemory, BROADCAST_ID};
 use crate::dom::DomContext;
+use crate::business;
 
 /// Safe sandboxed environment to evaluate dynamic scripts (e.g. from LLM).
 pub struct ScriptEngine {
@@ -395,6 +396,12 @@ impl ScriptEngine {
                 Err("DOM Context unavailable".to_string())
             }
         });
+
+        // --- BUSINESS ANALYTICS APIS FOR RHAI ---
+        engine.register_fn("json_extract_string", business::json_extract_string);
+        engine.register_fn("regex_extract", business::regex_extract);
+        engine.register_fn("regex_extract_all", business::regex_extract_all);
+        engine.register_fn("sum_number_strings", business::sum_number_strings);
 
         // We can still keep utility functions
         engine.register_fn("render_html_card", |title: &str, content: &str| -> String {
