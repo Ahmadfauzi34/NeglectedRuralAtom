@@ -1,7 +1,7 @@
 use wasm_bindgen::prelude::*;
 use std::sync::{Arc, RwLock};
 
-use crate::field::{AgentField, KernelConfig, step_agents, SpatialGrid};
+use crate::field::{AgentField, KernelConfig, step_agents, SpatialGrid, DataWorkerField, MessageBus};
 use crate::command::CommandBus;
 use crate::render::{CanvasEncoder, agent_renderer::encode_agents, GpuBuffer};
 use crate::scripting::ScriptEngine;
@@ -12,6 +12,8 @@ use crate::prompt::PromptBuilder;
 /// to read the state safely without blocking rendering.
 pub struct SharedState {
     pub field: AgentField,
+    pub workers: DataWorkerField,
+    pub messages: MessageBus,
     pub config: KernelConfig,
     pub spatial_grid: SpatialGrid,
 }
@@ -26,6 +28,7 @@ pub struct KernelBridge {
     gpu_buffer: GpuBuffer,
     script_engine: ScriptEngine,
     prompt_builder: PromptBuilder,
+    use_webgl: bool,
 }
 
 #[wasm_bindgen]
@@ -37,6 +40,8 @@ impl KernelBridge {
         
         let state = SharedState {
             field,
+            workers: DataWorkerField::new(max_agents),
+            messages: MessageBus::new(1024),
             config: KernelConfig::default(),
             spatial_grid: SpatialGrid::new(80.0),
         };
@@ -49,7 +54,8 @@ impl KernelBridge {
             render_len: 0,
             gpu_buffer: GpuBuffer::new(max_agents),
             script_engine: ScriptEngine::new(),
-            prompt_builder: PromptBuilder::new(10_000), // Pre-allocate 10KB string buffer
+            prompt_builder: PromptBuilder::new(max_agents * 128), // 128 bytes roughly covers each agent printout
+            use_webgl: false,
         }
     }
     
@@ -68,18 +74,42 @@ impl KernelBridge {
     /// Evaluates a dynamic LLM-generated script against the WASM engine.
     pub fn eval_llm_script(&mut self, script: &str) -> String {
         let mut state = self.state.write().unwrap();
-        match self.script_engine.eval(script, &mut state.field) {
+        let SharedState { field, workers, messages, .. } = &mut *state;
+        match self.script_engine.eval(script, field, workers, messages) {
             Ok(res) => res,
             Err(e) => e,
         }
     }
 
-    /// Asynchronously builds a prompt string containing the active agent states,
-    /// simulating an async workflow where we format memory without blocking the UI.
-    pub async fn generate_llm_prompt(&mut self) -> String {
-        // Read lock to safely read state concurrently.
-        let state = self.state.read().unwrap();
-        self.prompt_builder.build_agent_state_prompt(&state.field).to_string()
+    /// Builds a prompt string containing the active agent states.
+    /// Uses a snapshot approach to quickly release the `RwLock` and avoid blocking `step()`.
+    pub fn generate_llm_prompt(&mut self) -> String {
+        // Scope the lock to copy only what we need (Snapshot)
+        let snapshot = {
+            let state = self.state.read().unwrap();
+
+            // Limit snapshot size to avoid cloning huge arrays if not necessary
+            let limit = state.field.len.min(50);
+            let mut snap = Vec::with_capacity(limit);
+
+            let mut count = 0;
+            for i in 0..state.field.len {
+                if count >= limit { break; }
+                if state.field.active[i] == 1 {
+                    snap.push((
+                        i,
+                        state.field.pos_x[i], state.field.pos_y[i],
+                        state.field.vel_x[i], state.field.vel_y[i],
+                        state.field.health[i]
+                    ));
+                    count += 1;
+                }
+            }
+            (snap, state.field.len)
+        }; // Read Lock is DROPPED here immediately!
+
+        // Now build the prompt text (which takes formatting time) without locking the main thread
+        self.prompt_builder.build_from_snapshot(&snapshot.0, snapshot.1).to_string()
     }
 
     pub fn spawn(&mut self, x: f32, y: f32, health: f32) -> usize {
@@ -92,6 +122,10 @@ impl KernelBridge {
         state.field.kill_swap(idx);
     }
     
+    pub fn set_render_mode(&mut self, use_webgl: bool) {
+        self.use_webgl = use_webgl;
+    }
+
     pub fn set_config(&mut self, dt: f32, friction: f32, max_speed: f32, influence_radius: f32) {
         let mut state = self.state.write().unwrap();
         state.config = KernelConfig {
@@ -107,7 +141,7 @@ impl KernelBridge {
         let mut state = self.state.write().unwrap();
 
         // Destructure state to avoid borrow checker conflicts
-        let SharedState { field, config, spatial_grid } = &mut *state;
+        let SharedState { field, workers: _, messages: _, config, spatial_grid } = &mut *state;
 
         // Execute pending commands
         self.cmd_bus.execute(field, config);
@@ -115,14 +149,17 @@ impl KernelBridge {
         // Step physics and AI
         step_agents(field, config, spatial_grid);
 
-        // Classic CPU Canvas Rendering
-        encode_agents(&mut self.encoder, field, 0xFF6366F1);
-        let (ptr, len) = self.encoder.encode();
-        self.render_ptr = ptr;
-        self.render_len = len;
-
-        // Zero-copy Instanced Buffer Rendering for WebGL
-        self.gpu_buffer.update(field);
+        // Render pass optimization: Branch execution based on chosen target
+        if self.use_webgl {
+            // Zero-copy Instanced Buffer Rendering for WebGL
+            self.gpu_buffer.update(field);
+        } else {
+            // Classic CPU Canvas Rendering
+            encode_agents(&mut self.encoder, field, 0xFF6366F1);
+            let (ptr, len) = self.encoder.encode();
+            self.render_ptr = ptr;
+            self.render_len = len;
+        }
     }
 
     #[wasm_bindgen(getter)]
