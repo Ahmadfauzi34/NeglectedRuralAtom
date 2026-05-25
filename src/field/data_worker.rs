@@ -93,19 +93,29 @@ impl DataWorkerField {
                 // Relocate Payload
                 let (p_start, p_end) = self.payload_slices[i];
                 if p_start != p_end {
-                    let text = &self.text_arena[p_start as usize..p_end as usize];
-                    let new_start = new_arena.len() as u32;
-                    new_arena.push_str(text);
-                    self.payload_slices[i] = (new_start, new_arena.len() as u32);
+                    if let Some(text) = self.text_arena.get(p_start as usize..p_end as usize) {
+                        let new_start = new_arena.len() as u32;
+                        new_arena.push_str(text);
+                        self.payload_slices[i] = (new_start, new_arena.len() as u32);
+                    } else {
+                        self.payload_slices[i] = (new_arena.len() as u32, new_arena.len() as u32);
+                    }
+                } else {
+                    self.payload_slices[i] = (new_arena.len() as u32, new_arena.len() as u32);
                 }
 
                 // Relocate Result
                 let (r_start, r_end) = self.result_slices[i];
                 if r_start != r_end {
-                    let text = &self.text_arena[r_start as usize..r_end as usize];
-                    let new_start = new_arena.len() as u32;
-                    new_arena.push_str(text);
-                    self.result_slices[i] = (new_start, new_arena.len() as u32);
+                    if let Some(text) = self.text_arena.get(r_start as usize..r_end as usize) {
+                        let new_start = new_arena.len() as u32;
+                        new_arena.push_str(text);
+                        self.result_slices[i] = (new_start, new_arena.len() as u32);
+                    } else {
+                        self.result_slices[i] = (new_arena.len() as u32, new_arena.len() as u32);
+                    }
+                } else {
+                    self.result_slices[i] = (new_arena.len() as u32, new_arena.len() as u32);
                 }
             } else {
                 // Reset dead slices

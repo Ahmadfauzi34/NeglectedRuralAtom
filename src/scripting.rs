@@ -1,5 +1,5 @@
-use rhai::{Engine, Scope, Dynamic, CustomType};
-use crate::field::{AgentField, DataWorkerField, MessageBus, EnvironmentGrid, BROADCAST_ID};
+use rhai::{Engine, Scope, Dynamic, CustomType, Array};
+use crate::field::{AgentField, DataWorkerField, MessageBus, EnvironmentGrid, vector_memory::VectorMemory, BROADCAST_ID};
 use crate::dom::DomContext;
 
 /// Safe sandboxed environment to evaluate dynamic scripts (e.g. from LLM).
@@ -127,8 +127,12 @@ impl WorkerContext {
     pub fn get_worker_payload(&mut self, idx: i64) -> String {
         let workers = self.get_workers();
         if idx >= 0 && (idx as usize) < workers.len {
-            let (start, end) = workers.payload_slices[idx as usize];
-            workers.text_arena[start as usize..end as usize].to_string()
+            if let Some(&(start, end)) = workers.payload_slices.get(idx as usize) {
+                if let Some(text) = workers.text_arena.get(start as usize..end as usize) {
+                    return text.to_string();
+                }
+            }
+            String::new()
         } else {
             String::new()
         }
@@ -185,7 +189,12 @@ impl MessageContext {
     pub fn get_payload(&mut self, idx: i64) -> String {
         let bus = self.get_bus();
         if idx >= 0 && (idx as usize) < bus.len {
-            bus.get_payload(idx as usize).to_string()
+            if let Some(&(start, end)) = bus.payload_slices.get(idx as usize) {
+                if let Some(text) = bus.text_arena.get(start as usize..end as usize) {
+                    return text.to_string();
+                }
+            }
+            String::new()
         } else {
             String::new()
         }
@@ -194,7 +203,7 @@ impl MessageContext {
     pub fn get_sender(&mut self, idx: i64) -> i64 {
         let bus = self.get_bus();
         if idx >= 0 && (idx as usize) < bus.len {
-            bus.sender_ids[idx as usize] as i64
+            bus.sender_ids.get(idx as usize).copied().unwrap_or(0) as i64
         } else {
             -1
         }
@@ -203,7 +212,7 @@ impl MessageContext {
     pub fn get_type(&mut self, idx: i64) -> i64 {
         let bus = self.get_bus();
         if idx >= 0 && (idx as usize) < bus.len {
-            bus.message_types[idx as usize] as i64
+            bus.message_types.get(idx as usize).copied().unwrap_or(0) as i64
         } else {
             -1
         }
@@ -238,6 +247,54 @@ impl EnvironmentContext {
 
     pub fn add_value(&mut self, x: f32, y: f32, amount: f32) {
         self.get_env().add_value(x, y, amount);
+    }
+}
+
+/// A wrapper pointer context to allow Rhai to safely manipulate the VectorMemory (RAG).
+#[derive(Clone, CustomType)]
+pub struct VectorMemoryContext {
+    ptr: *mut VectorMemory,
+}
+
+impl VectorMemoryContext {
+    pub fn new(mem: &mut VectorMemory) -> Self {
+        Self {
+            ptr: mem as *mut VectorMemory,
+        }
+    }
+
+    #[inline]
+    fn get_mem(&mut self) -> &mut VectorMemory {
+        unsafe { &mut *self.ptr }
+    }
+
+    pub fn store(&mut self, id: &str, vector_array: Array) {
+        let mut rust_vec = Vec::with_capacity(16);
+        for dyn_val in vector_array {
+            if let Ok(val) = dyn_val.as_float() {
+                rust_vec.push(val as f32);
+            } else if let Ok(val) = dyn_val.as_int() {
+                rust_vec.push(val as f32);
+            }
+        }
+        self.get_mem().store(id, &rust_vec);
+    }
+
+    pub fn search(&mut self, query_array: Array) -> String {
+        let mut rust_vec = Vec::with_capacity(16);
+        for dyn_val in query_array {
+            if let Ok(val) = dyn_val.as_float() {
+                rust_vec.push(val as f32);
+            } else if let Ok(val) = dyn_val.as_int() {
+                rust_vec.push(val as f32);
+            }
+        }
+
+        if let Some((id, _score)) = self.get_mem().search(&rust_vec) {
+            id
+        } else {
+            String::new()
+        }
     }
 }
 
@@ -281,6 +338,11 @@ impl ScriptEngine {
         engine.register_fn("env_get", EnvironmentContext::get_value);
         engine.register_fn("env_set", EnvironmentContext::set_value);
         engine.register_fn("env_add", EnvironmentContext::add_value);
+
+        // --- VECTOR MEMORY APIS FOR RHAI ---
+        engine.build_type::<VectorMemoryContext>();
+        engine.register_fn("mem_store", VectorMemoryContext::store);
+        engine.register_fn("mem_search", VectorMemoryContext::search);
 
         // --- DOM MANIPULATION APIS FOR RHAI ---
 
@@ -338,7 +400,7 @@ impl ScriptEngine {
 
     /// Evaluates a Rhai script string and returns the resulting String.
     /// Passes the contexts as dynamic variables to the script.
-    pub fn eval(&mut self, script: &str, field: &mut AgentField, workers: &mut DataWorkerField, messages: &mut MessageBus, env_grid: &mut EnvironmentGrid) -> Result<String, String> {
+    pub fn eval(&mut self, script: &str, field: &mut AgentField, workers: &mut DataWorkerField, messages: &mut MessageBus, env_grid: &mut EnvironmentGrid, vector_mem: &mut VectorMemory) -> Result<String, String> {
         let mut scope = Scope::new();
 
         // Push the contexts into the scope so the script can access them
@@ -346,10 +408,12 @@ impl ScriptEngine {
         let w_ctx = WorkerContext::new(workers);
         let m_ctx = MessageContext::new(messages);
         let e_ctx = EnvironmentContext::new(env_grid);
+        let v_ctx = VectorMemoryContext::new(vector_mem);
         scope.push("field", f_ctx);
         scope.push("workers", w_ctx);
         scope.push("messages", m_ctx);
         scope.push("env_grid", e_ctx);
+        scope.push("vector_mem", v_ctx);
 
         // Execute the script and format the output as a string to return to JS
         match self.engine.eval_with_scope::<Dynamic>(&mut scope, script) {
