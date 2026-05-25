@@ -174,6 +174,22 @@ impl ScriptEngine {
             }
         });
 
+        engine.register_fn("dom_set_style", |target_id: &str, property: &str, value: &str| -> Result<(), String> {
+            if let Some(dom) = DomContext::new() {
+                dom.set_style(target_id, property, value)
+            } else {
+                Err("DOM Context unavailable".to_string())
+            }
+        });
+
+        engine.register_fn("dom_get_value", |target_id: &str| -> Result<String, String> {
+            if let Some(dom) = DomContext::new() {
+                dom.get_value(target_id)
+            } else {
+                Err("DOM Context unavailable".to_string())
+            }
+        });
+
         // We can still keep utility functions
         engine.register_fn("render_html_card", |title: &str, content: &str| -> String {
             format!("<div class='agent-card'><h3>{}</h3><p>{}</p></div>", title, content)
