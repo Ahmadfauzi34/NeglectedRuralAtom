@@ -6,7 +6,7 @@ use crate::telemetry::EngineMetrics;
 
 /// Safe sandboxed environment to evaluate dynamic scripts (e.g. from LLM).
 pub struct ScriptEngine {
-    engine: Engine,
+    pub engine: Engine,
 }
 
 /// A wrapper pointer context to allow Rhai to safely manipulate the SOA AgentField.
@@ -442,16 +442,24 @@ impl ScriptEngine {
     }
 
     /// Evaluates a Rhai script string and returns the resulting String.
-    /// Passes the contexts as dynamic variables to the script.
-    pub fn eval(&mut self, script: &str, field: &mut AgentField, workers: &mut DataWorkerField, messages: &mut MessageBus, env_grid: &mut EnvironmentGrid, vector_mem: &mut VectorMemory, metrics: EngineMetrics) -> Result<String, String> {
-        let mut scope = Scope::new();
-
-        // Push the contexts into the scope so the script can access them
+    /// Helper to inject memory bindings into a borrowed scope.
+    pub fn eval_with_injected_scope(
+        &mut self,
+        scope: &mut Scope,
+        script: &str,
+        field: &mut AgentField,
+        workers: &mut DataWorkerField,
+        messages: &mut MessageBus,
+        env_grid: &mut EnvironmentGrid,
+        vector_mem: &mut VectorMemory,
+        metrics: EngineMetrics
+    ) -> Result<String, String> {
         let f_ctx = FieldContext::new(field);
         let w_ctx = WorkerContext::new(workers);
         let m_ctx = MessageContext::new(messages);
         let e_ctx = EnvironmentContext::new(env_grid);
         let v_ctx = VectorMemoryContext::new(vector_mem);
+
         scope.push("field", f_ctx);
         scope.push("workers", w_ctx);
         scope.push("messages", m_ctx);
@@ -459,18 +467,23 @@ impl ScriptEngine {
         scope.push("vector_mem", v_ctx);
         scope.push("metrics", metrics);
 
-        // Execute the script and format the output as a string to return to JS
-        match self.engine.eval_with_scope::<Dynamic>(&mut scope, script) {
+        if script.is_empty() {
+            return Ok("".to_string());
+        }
+
+        match self.engine.eval_with_scope::<Dynamic>(scope, script) {
             Ok(result) => Ok(result.to_string()),
             Err(e) => {
-                // If it's just a variable not found (like when checking bindings in tests), return empty instead of failing
                 let err_str = e.to_string();
-                if err_str.contains("Function not found") || err_str.contains("Variable not found") {
-                    Err(format!("LLM Script Error: {}", err_str))
-                } else {
-                    Err(format!("LLM Script Error: {}", err_str))
-                }
-            },
+                Err(format!("LLM Script Error: {}", err_str))
+            }
         }
+    }
+
+    /// Evaluates a Rhai script string and returns the resulting String.
+    /// Passes the contexts as dynamic variables to the script.
+    pub fn eval(&mut self, script: &str, field: &mut AgentField, workers: &mut DataWorkerField, messages: &mut MessageBus, env_grid: &mut EnvironmentGrid, vector_mem: &mut VectorMemory, metrics: EngineMetrics) -> Result<String, String> {
+        let mut scope = Scope::new();
+        self.eval_with_injected_scope(&mut scope, script, field, workers, messages, env_grid, vector_mem, metrics)
     }
 }

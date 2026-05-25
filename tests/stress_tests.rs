@@ -23,6 +23,8 @@ mod prompt;
 mod business;
 #[path = "../src/telemetry.rs"]
 mod telemetry;
+#[path = "../src/graph.rs"]
+mod graph;
 
 use bridge::KernelBridge;
 
