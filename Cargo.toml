@@ -54,3 +54,6 @@ default = ["wee_alloc"]
 [target.wasm32-unknown-unknown.dependencies.getrandom]
 version = "0.3"
 features = ["wasm_js"]
+
+[dev-dependencies]
+fastrand = "2.4.1"
