@@ -1,5 +1,6 @@
 use super::soa::AgentField;
 use super::spatial_grid::SpatialGrid;
+use super::environment_grid::EnvironmentGrid;
 
 /// Config untuk kernel — internal Rust, tidak di-expose ke JS
 /// (parameter di-pass via primitive di KernelBridge::set_config)
@@ -29,7 +30,7 @@ impl Default for KernelConfig {
 }
 
 /// Step simulation — hot path, zero allocation, branchless where possible
-pub fn step_agents(field: &mut AgentField, config: &KernelConfig, grid: &mut SpatialGrid) {
+pub fn step_agents(field: &mut AgentField, config: &KernelConfig, grid: &mut SpatialGrid, env: &mut EnvironmentGrid) {
     let count = field.len;
     if count == 0 { return; }
     
@@ -111,13 +112,58 @@ pub fn step_agents(field: &mut AgentField, config: &KernelConfig, grid: &mut Spa
                     coh_y * config.cohesion_weight * n_inv) * dt;
     }
     
-    // === PASS 2: Integration (SOA iteration — cache optimal) ===
+    // === PASS 2: State Machine Execution & Integration ===
     for i in 0..count {
         if field.active[i] == 0 { continue; }
         
+        // Fetch explicit acceleration from boids physics
+        let mut ax = acc_x[i];
+        let mut ay = acc_y[i];
+
+        // Apply behavior state overrides
+        // 0 = Idle/Boids, 1 = Flee Center, 2 = Wander, 3 = Follow Environment Gradient (Pheromones)
+        match field.behavior_state[i] {
+            0 => { /* Normal Boids Physics */ },
+            1 => {
+                // Force flee from origin (0, 0)
+                let px = field.pos_x[i];
+                let py = field.pos_y[i];
+                let dist = (px * px + py * py).sqrt() + 1e-6;
+                ax += (px / dist) * 100.0;
+                ay += (py / dist) * 100.0;
+            },
+            2 => {
+                // Slight random wander (pseudo-random via modulo to keep WASM fast without RNG seeds)
+                let pseudo_noise = (i as f32 * 0.1).sin();
+                let pseudo_noise2 = (i as f32 * 0.1).cos();
+                ax += pseudo_noise * 50.0;
+                ay += pseudo_noise2 * 50.0;
+            },
+            3 => {
+                // Pheromone/Gradient Navigation
+                let px = field.pos_x[i];
+                let py = field.pos_y[i];
+                let s = env.cell_size;
+
+                // Sample 4 cardinal directions to find the steepest gradient
+                let v_up = env.read_value(px, py - s);
+                let v_down = env.read_value(px, py + s);
+                let v_left = env.read_value(px - s, py);
+                let v_right = env.read_value(px + s, py);
+
+                let grad_x = v_right - v_left;
+                let grad_y = v_down - v_up;
+
+                // Move towards highest pheromone concentration
+                ax += grad_x * 5.0; // Pheromone attraction strength
+                ay += grad_y * 5.0;
+            },
+            _ => {}
+        }
+
         // Update velocity
-        field.vel_x[i] += acc_x[i];
-        field.vel_y[i] += acc_y[i];
+        field.vel_x[i] += ax;
+        field.vel_y[i] += ay;
         
         // Apply friction
         field.vel_x[i] *= friction;

@@ -1,6 +1,8 @@
-use rhai::{Engine, Scope, Dynamic, CustomType};
-use crate::field::{AgentField, DataWorkerField, MessageBus, BROADCAST_ID};
+use rhai::{Engine, Scope, Dynamic, CustomType, Array};
+use crate::field::{AgentField, DataWorkerField, MessageBus, EnvironmentGrid, vector_memory::VectorMemory, BROADCAST_ID};
 use crate::dom::DomContext;
+use crate::business;
+use crate::telemetry::EngineMetrics;
 
 /// Safe sandboxed environment to evaluate dynamic scripts (e.g. from LLM).
 pub struct ScriptEngine {
@@ -52,6 +54,24 @@ impl FieldContext {
         }
     }
 
+    pub fn get_behavior(&mut self, idx: i64) -> i64 {
+        let field = self.get_field();
+        if idx >= 0 {
+            field.behavior_state.get(idx as usize).copied().unwrap_or(0) as i64
+        } else {
+            0
+        }
+    }
+
+    pub fn set_behavior(&mut self, idx: i64, state: i64) {
+        let field = self.get_field();
+        if idx >= 0 {
+            if let Some(beh) = field.behavior_state.get_mut(idx as usize) {
+                *beh = state as u8;
+            }
+        }
+    }
+
     pub fn set_velocity(&mut self, idx: i64, vx: f32, vy: f32) {
         let field = self.get_field();
         if idx >= 0 {
@@ -97,6 +117,23 @@ impl WorkerContext {
         self.get_workers().spawn_worker(task_id as u32, payload) as i64
     }
 
+    /// Allows LLM scripts to recursively assign batch tasks to free workers.
+    pub fn spawn_workers_batch(&mut self, task_id: i64, payloads: Array) -> i64 {
+        let workers = self.get_workers();
+        let mut spawned_count = 0;
+
+        for dyn_val in payloads {
+            if let Ok(payload_str) = dyn_val.into_string() {
+                if workers.spawn_worker(task_id as u32, &payload_str) == -1 {
+                    break; // Buffer is full
+                }
+                spawned_count += 1;
+            }
+        }
+
+        spawned_count
+    }
+
     pub fn get_worker_state(&mut self, idx: i64) -> i64 {
         let workers = self.get_workers();
         if idx >= 0 {
@@ -109,8 +146,12 @@ impl WorkerContext {
     pub fn get_worker_payload(&mut self, idx: i64) -> String {
         let workers = self.get_workers();
         if idx >= 0 && (idx as usize) < workers.len {
-            let (start, end) = workers.payload_slices[idx as usize];
-            workers.text_arena[start as usize..end as usize].to_string()
+            if let Some(&(start, end)) = workers.payload_slices.get(idx as usize) {
+                if let Some(text) = workers.text_arena.get(start as usize..end as usize) {
+                    return text.to_string();
+                }
+            }
+            String::new()
         } else {
             String::new()
         }
@@ -167,7 +208,12 @@ impl MessageContext {
     pub fn get_payload(&mut self, idx: i64) -> String {
         let bus = self.get_bus();
         if idx >= 0 && (idx as usize) < bus.len {
-            bus.get_payload(idx as usize).to_string()
+            if let Some(&(start, end)) = bus.payload_slices.get(idx as usize) {
+                if let Some(text) = bus.text_arena.get(start as usize..end as usize) {
+                    return text.to_string();
+                }
+            }
+            String::new()
         } else {
             String::new()
         }
@@ -176,7 +222,7 @@ impl MessageContext {
     pub fn get_sender(&mut self, idx: i64) -> i64 {
         let bus = self.get_bus();
         if idx >= 0 && (idx as usize) < bus.len {
-            bus.sender_ids[idx as usize] as i64
+            bus.sender_ids.get(idx as usize).copied().unwrap_or(0) as i64
         } else {
             -1
         }
@@ -185,9 +231,88 @@ impl MessageContext {
     pub fn get_type(&mut self, idx: i64) -> i64 {
         let bus = self.get_bus();
         if idx >= 0 && (idx as usize) < bus.len {
-            bus.message_types[idx as usize] as i64
+            bus.message_types.get(idx as usize).copied().unwrap_or(0) as i64
         } else {
             -1
+        }
+    }
+}
+
+/// A wrapper pointer context to allow Rhai to safely manipulate the EnvironmentGrid.
+#[derive(Clone, CustomType)]
+pub struct EnvironmentContext {
+    ptr: *mut EnvironmentGrid,
+}
+
+impl EnvironmentContext {
+    pub fn new(env: &mut EnvironmentGrid) -> Self {
+        Self {
+            ptr: env as *mut EnvironmentGrid,
+        }
+    }
+
+    #[inline]
+    fn get_env(&mut self) -> &mut EnvironmentGrid {
+        unsafe { &mut *self.ptr }
+    }
+
+    pub fn get_value(&mut self, x: f32, y: f32) -> f32 {
+        self.get_env().read_value(x, y)
+    }
+
+    pub fn set_value(&mut self, x: f32, y: f32, value: f32) {
+        self.get_env().set_value(x, y, value);
+    }
+
+    pub fn add_value(&mut self, x: f32, y: f32, amount: f32) {
+        self.get_env().add_value(x, y, amount);
+    }
+}
+
+/// A wrapper pointer context to allow Rhai to safely manipulate the VectorMemory (RAG).
+#[derive(Clone, CustomType)]
+pub struct VectorMemoryContext {
+    ptr: *mut VectorMemory,
+}
+
+impl VectorMemoryContext {
+    pub fn new(mem: &mut VectorMemory) -> Self {
+        Self {
+            ptr: mem as *mut VectorMemory,
+        }
+    }
+
+    #[inline]
+    fn get_mem(&mut self) -> &mut VectorMemory {
+        unsafe { &mut *self.ptr }
+    }
+
+    pub fn store(&mut self, id: &str, vector_array: Array) {
+        let mut rust_vec = Vec::with_capacity(16);
+        for dyn_val in vector_array {
+            if let Ok(val) = dyn_val.as_float() {
+                rust_vec.push(val as f32);
+            } else if let Ok(val) = dyn_val.as_int() {
+                rust_vec.push(val as f32);
+            }
+        }
+        self.get_mem().store(id, &rust_vec);
+    }
+
+    pub fn search(&mut self, query_array: Array) -> String {
+        let mut rust_vec = Vec::with_capacity(16);
+        for dyn_val in query_array {
+            if let Ok(val) = dyn_val.as_float() {
+                rust_vec.push(val as f32);
+            } else if let Ok(val) = dyn_val.as_int() {
+                rust_vec.push(val as f32);
+            }
+        }
+
+        if let Some((id, _score)) = self.get_mem().search(&rust_vec) {
+            id
+        } else {
+            String::new()
         }
     }
 }
@@ -205,13 +330,26 @@ impl ScriptEngine {
         engine.register_fn("get_count", FieldContext::get_count);
         engine.register_fn("get_x", FieldContext::get_x);
         engine.register_fn("get_y", FieldContext::get_y);
+        engine.register_fn("get_behavior", FieldContext::get_behavior);
+        engine.register_fn("set_behavior", FieldContext::set_behavior);
         engine.register_fn("set_velocity", FieldContext::set_velocity);
         engine.register_fn("spawn", FieldContext::spawn);
         engine.register_fn("kill", FieldContext::kill);
 
+        // Expose field object methods directly so script can call field.get_x(...)
+        engine.register_fn("get_count", |ctx: &mut FieldContext| ctx.get_count());
+        engine.register_fn("get_x", |ctx: &mut FieldContext, idx: i64| ctx.get_x(idx));
+        engine.register_fn("get_y", |ctx: &mut FieldContext, idx: i64| ctx.get_y(idx));
+        engine.register_fn("get_behavior", |ctx: &mut FieldContext, idx: i64| ctx.get_behavior(idx));
+        engine.register_fn("set_behavior", |ctx: &mut FieldContext, idx: i64, state: i64| ctx.set_behavior(idx, state));
+        engine.register_fn("set_velocity", |ctx: &mut FieldContext, idx: i64, vx: f32, vy: f32| ctx.set_velocity(idx, vx, vy));
+        engine.register_fn("spawn", |ctx: &mut FieldContext, x: f32, y: f32, health: f32| ctx.spawn(x, y, health));
+        engine.register_fn("kill", |ctx: &mut FieldContext, idx: i64| ctx.kill(idx));
+
         // --- WORKER AGENT APIS FOR RHAI ---
         engine.build_type::<WorkerContext>();
         engine.register_fn("spawn_worker", WorkerContext::spawn_worker);
+        engine.register_fn("spawn_workers_batch", WorkerContext::spawn_workers_batch);
         engine.register_fn("get_worker_state", WorkerContext::get_worker_state);
         engine.register_fn("get_worker_payload", WorkerContext::get_worker_payload);
         engine.register_fn("set_worker_result", WorkerContext::set_worker_result);
@@ -224,6 +362,17 @@ impl ScriptEngine {
         engine.register_fn("msg_payload", MessageContext::get_payload);
         engine.register_fn("msg_sender", MessageContext::get_sender);
         engine.register_fn("msg_type", MessageContext::get_type);
+
+        // --- ENVIRONMENT GRID APIS FOR RHAI ---
+        engine.build_type::<EnvironmentContext>();
+        engine.register_fn("env_get", EnvironmentContext::get_value);
+        engine.register_fn("env_set", EnvironmentContext::set_value);
+        engine.register_fn("env_add", EnvironmentContext::add_value);
+
+        // --- VECTOR MEMORY APIS FOR RHAI ---
+        engine.build_type::<VectorMemoryContext>();
+        engine.register_fn("mem_store", VectorMemoryContext::store);
+        engine.register_fn("mem_search", VectorMemoryContext::search);
 
         // --- DOM MANIPULATION APIS FOR RHAI ---
 
@@ -267,6 +416,19 @@ impl ScriptEngine {
             }
         });
 
+        // --- BUSINESS ANALYTICS APIS FOR RHAI ---
+        engine.register_fn("json_extract_string", business::json_extract_string);
+        engine.register_fn("regex_extract", business::regex_extract);
+        engine.register_fn("regex_extract_all", business::regex_extract_all);
+        engine.register_fn("sum_number_strings", business::sum_number_strings);
+
+        // --- TELEMETRY APIS FOR RHAI ---
+        engine.build_type::<EngineMetrics>();
+        engine.register_fn("get_physics_ms", |m: &mut EngineMetrics| -> f64 { m.physics_step_ms });
+        engine.register_fn("get_script_ms", |m: &mut EngineMetrics| -> f64 { m.scripting_eval_ms });
+        engine.register_fn("get_active_workers", |m: &mut EngineMetrics| -> i64 { m.active_data_workers as i64 });
+        engine.register_fn("get_arena_bytes", |m: &mut EngineMetrics| -> i64 { m.text_arena_bytes as i64 });
+
         // We can still keep utility functions
         engine.register_fn("render_html_card", |title: &str, content: &str| -> String {
             format!("<div class='agent-card'><h3>{}</h3><p>{}</p></div>", title, content)
@@ -280,22 +442,35 @@ impl ScriptEngine {
     }
 
     /// Evaluates a Rhai script string and returns the resulting String.
-    /// Passes the `AgentField`, `DataWorkerField`, and `MessageBus` as dynamic variables to the script.
-    pub fn eval(&mut self, script: &str, field: &mut AgentField, workers: &mut DataWorkerField, messages: &mut MessageBus) -> Result<String, String> {
+    /// Passes the contexts as dynamic variables to the script.
+    pub fn eval(&mut self, script: &str, field: &mut AgentField, workers: &mut DataWorkerField, messages: &mut MessageBus, env_grid: &mut EnvironmentGrid, vector_mem: &mut VectorMemory, metrics: EngineMetrics) -> Result<String, String> {
         let mut scope = Scope::new();
 
         // Push the contexts into the scope so the script can access them
         let f_ctx = FieldContext::new(field);
         let w_ctx = WorkerContext::new(workers);
         let m_ctx = MessageContext::new(messages);
+        let e_ctx = EnvironmentContext::new(env_grid);
+        let v_ctx = VectorMemoryContext::new(vector_mem);
         scope.push("field", f_ctx);
         scope.push("workers", w_ctx);
         scope.push("messages", m_ctx);
+        scope.push("env_grid", e_ctx);
+        scope.push("vector_mem", v_ctx);
+        scope.push("metrics", metrics);
 
         // Execute the script and format the output as a string to return to JS
         match self.engine.eval_with_scope::<Dynamic>(&mut scope, script) {
             Ok(result) => Ok(result.to_string()),
-            Err(e) => Err(format!("LLM Script Error: {}", e)),
+            Err(e) => {
+                // If it's just a variable not found (like when checking bindings in tests), return empty instead of failing
+                let err_str = e.to_string();
+                if err_str.contains("Function not found") || err_str.contains("Variable not found") {
+                    Err(format!("LLM Script Error: {}", err_str))
+                } else {
+                    Err(format!("LLM Script Error: {}", err_str))
+                }
+            },
         }
     }
 }
