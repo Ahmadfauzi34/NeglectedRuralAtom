@@ -1,7 +1,7 @@
 use wasm_bindgen::prelude::*;
 use std::sync::{Arc, RwLock};
 
-use crate::field::{AgentField, KernelConfig, step_agents, SpatialGrid, DataWorkerField, MessageBus};
+use crate::field::{AgentField, KernelConfig, step_agents, SpatialGrid, DataWorkerField, MessageBus, EnvironmentGrid};
 use crate::command::CommandBus;
 use crate::render::{CanvasEncoder, agent_renderer::encode_agents, GpuBuffer};
 use crate::scripting::ScriptEngine;
@@ -14,6 +14,7 @@ pub struct SharedState {
     pub field: AgentField,
     pub workers: DataWorkerField,
     pub messages: MessageBus,
+    pub env_grid: EnvironmentGrid,
     pub config: KernelConfig,
     pub spatial_grid: SpatialGrid,
 }
@@ -42,6 +43,7 @@ impl KernelBridge {
             field,
             workers: DataWorkerField::new(max_agents),
             messages: MessageBus::new(1024),
+            env_grid: EnvironmentGrid::new(100, 100, 10.0), // 100x100 grid, 10px per cell
             config: KernelConfig::default(),
             spatial_grid: SpatialGrid::new(80.0),
         };
@@ -74,8 +76,8 @@ impl KernelBridge {
     /// Evaluates a dynamic LLM-generated script against the WASM engine.
     pub fn eval_llm_script(&mut self, script: &str) -> String {
         let mut state = self.state.write().unwrap();
-        let SharedState { field, workers, messages, .. } = &mut *state;
-        match self.script_engine.eval(script, field, workers, messages) {
+        let SharedState { field, workers, messages, env_grid, .. } = &mut *state;
+        match self.script_engine.eval(script, field, workers, messages, env_grid) {
             Ok(res) => res,
             Err(e) => e,
         }
@@ -141,13 +143,16 @@ impl KernelBridge {
         let mut state = self.state.write().unwrap();
 
         // Destructure state to avoid borrow checker conflicts
-        let SharedState { field, workers: _, messages: _, config, spatial_grid } = &mut *state;
+        let SharedState { field, workers: _, messages: _, env_grid, config, spatial_grid } = &mut *state;
 
         // Execute pending commands
         self.cmd_bus.execute(field, config);
 
+        // Decay environment pheromones slightly every frame
+        env_grid.decay(0.99);
+
         // Step physics and AI
-        step_agents(field, config, spatial_grid);
+        step_agents(field, config, spatial_grid, env_grid);
 
         // Render pass optimization: Branch execution based on chosen target
         if self.use_webgl {

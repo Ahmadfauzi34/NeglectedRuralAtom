@@ -1,5 +1,5 @@
 use rhai::{Engine, Scope, Dynamic, CustomType};
-use crate::field::{AgentField, DataWorkerField, MessageBus, BROADCAST_ID};
+use crate::field::{AgentField, DataWorkerField, MessageBus, EnvironmentGrid, BROADCAST_ID};
 use crate::dom::DomContext;
 
 /// Safe sandboxed environment to evaluate dynamic scripts (e.g. from LLM).
@@ -210,6 +210,37 @@ impl MessageContext {
     }
 }
 
+/// A wrapper pointer context to allow Rhai to safely manipulate the EnvironmentGrid.
+#[derive(Clone, CustomType)]
+pub struct EnvironmentContext {
+    ptr: *mut EnvironmentGrid,
+}
+
+impl EnvironmentContext {
+    pub fn new(env: &mut EnvironmentGrid) -> Self {
+        Self {
+            ptr: env as *mut EnvironmentGrid,
+        }
+    }
+
+    #[inline]
+    fn get_env(&mut self) -> &mut EnvironmentGrid {
+        unsafe { &mut *self.ptr }
+    }
+
+    pub fn get_value(&mut self, x: f32, y: f32) -> f32 {
+        self.get_env().read_value(x, y)
+    }
+
+    pub fn set_value(&mut self, x: f32, y: f32, value: f32) {
+        self.get_env().set_value(x, y, value);
+    }
+
+    pub fn add_value(&mut self, x: f32, y: f32, amount: f32) {
+        self.get_env().add_value(x, y, amount);
+    }
+}
+
 impl ScriptEngine {
     pub fn new() -> Self {
         let mut engine = Engine::new();
@@ -244,6 +275,12 @@ impl ScriptEngine {
         engine.register_fn("msg_payload", MessageContext::get_payload);
         engine.register_fn("msg_sender", MessageContext::get_sender);
         engine.register_fn("msg_type", MessageContext::get_type);
+
+        // --- ENVIRONMENT GRID APIS FOR RHAI ---
+        engine.build_type::<EnvironmentContext>();
+        engine.register_fn("env_get", EnvironmentContext::get_value);
+        engine.register_fn("env_set", EnvironmentContext::set_value);
+        engine.register_fn("env_add", EnvironmentContext::add_value);
 
         // --- DOM MANIPULATION APIS FOR RHAI ---
 
@@ -300,17 +337,19 @@ impl ScriptEngine {
     }
 
     /// Evaluates a Rhai script string and returns the resulting String.
-    /// Passes the `AgentField`, `DataWorkerField`, and `MessageBus` as dynamic variables to the script.
-    pub fn eval(&mut self, script: &str, field: &mut AgentField, workers: &mut DataWorkerField, messages: &mut MessageBus) -> Result<String, String> {
+    /// Passes the contexts as dynamic variables to the script.
+    pub fn eval(&mut self, script: &str, field: &mut AgentField, workers: &mut DataWorkerField, messages: &mut MessageBus, env_grid: &mut EnvironmentGrid) -> Result<String, String> {
         let mut scope = Scope::new();
 
         // Push the contexts into the scope so the script can access them
         let f_ctx = FieldContext::new(field);
         let w_ctx = WorkerContext::new(workers);
         let m_ctx = MessageContext::new(messages);
+        let e_ctx = EnvironmentContext::new(env_grid);
         scope.push("field", f_ctx);
         scope.push("workers", w_ctx);
         scope.push("messages", m_ctx);
+        scope.push("env_grid", e_ctx);
 
         // Execute the script and format the output as a string to return to JS
         match self.engine.eval_with_scope::<Dynamic>(&mut scope, script) {

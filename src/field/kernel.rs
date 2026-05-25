@@ -1,5 +1,6 @@
 use super::soa::AgentField;
 use super::spatial_grid::SpatialGrid;
+use super::environment_grid::EnvironmentGrid;
 
 /// Config untuk kernel — internal Rust, tidak di-expose ke JS
 /// (parameter di-pass via primitive di KernelBridge::set_config)
@@ -29,7 +30,7 @@ impl Default for KernelConfig {
 }
 
 /// Step simulation — hot path, zero allocation, branchless where possible
-pub fn step_agents(field: &mut AgentField, config: &KernelConfig, grid: &mut SpatialGrid) {
+pub fn step_agents(field: &mut AgentField, config: &KernelConfig, grid: &mut SpatialGrid, env: &mut EnvironmentGrid) {
     let count = field.len;
     if count == 0 { return; }
     
@@ -120,7 +121,7 @@ pub fn step_agents(field: &mut AgentField, config: &KernelConfig, grid: &mut Spa
         let mut ay = acc_y[i];
 
         // Apply behavior state overrides
-        // 0 = Idle/Boids, 1 = Flee Center, 2 = Wander
+        // 0 = Idle/Boids, 1 = Flee Center, 2 = Wander, 3 = Follow Environment Gradient (Pheromones)
         match field.behavior_state[i] {
             0 => { /* Normal Boids Physics */ },
             1 => {
@@ -133,11 +134,29 @@ pub fn step_agents(field: &mut AgentField, config: &KernelConfig, grid: &mut Spa
             },
             2 => {
                 // Slight random wander (pseudo-random via modulo to keep WASM fast without RNG seeds)
-                // Real engines would use `getrandom` or a fast hash
                 let pseudo_noise = (i as f32 * 0.1).sin();
                 let pseudo_noise2 = (i as f32 * 0.1).cos();
                 ax += pseudo_noise * 50.0;
                 ay += pseudo_noise2 * 50.0;
+            },
+            3 => {
+                // Pheromone/Gradient Navigation
+                let px = field.pos_x[i];
+                let py = field.pos_y[i];
+                let s = env.cell_size;
+
+                // Sample 4 cardinal directions to find the steepest gradient
+                let v_up = env.read_value(px, py - s);
+                let v_down = env.read_value(px, py + s);
+                let v_left = env.read_value(px - s, py);
+                let v_right = env.read_value(px + s, py);
+
+                let grad_x = v_right - v_left;
+                let grad_y = v_down - v_up;
+
+                // Move towards highest pheromone concentration
+                ax += grad_x * 5.0; // Pheromone attraction strength
+                ay += grad_y * 5.0;
             },
             _ => {}
         }
