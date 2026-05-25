@@ -109,7 +109,8 @@ impl WorkerContext {
     pub fn get_worker_payload(&mut self, idx: i64) -> String {
         let workers = self.get_workers();
         if idx >= 0 && (idx as usize) < workers.len {
-            workers.payloads[idx as usize].clone()
+            let (start, end) = workers.payload_slices[idx as usize];
+            workers.text_arena[start as usize..end as usize].to_string()
         } else {
             String::new()
         }
@@ -118,8 +119,18 @@ impl WorkerContext {
     pub fn set_worker_result(&mut self, idx: i64, result: &str) {
         let workers = self.get_workers();
         if idx >= 0 && (idx as usize) < workers.len {
-            workers.results[idx as usize] = result.to_string();
+            let start = workers.text_arena.len() as u32;
+            workers.text_arena.push_str(result);
+            let end = workers.text_arena.len() as u32;
+
+            workers.result_slices[idx as usize] = (start, end);
             workers.states[idx as usize] = 2; // Done
+        }
+    }
+
+    pub fn kill_worker(&mut self, idx: i64) {
+        if idx >= 0 {
+            self.get_workers().kill_worker(idx as usize);
         }
     }
 }
@@ -147,6 +158,7 @@ impl ScriptEngine {
         engine.register_fn("get_worker_state", WorkerContext::get_worker_state);
         engine.register_fn("get_worker_payload", WorkerContext::get_worker_payload);
         engine.register_fn("set_worker_result", WorkerContext::set_worker_result);
+        engine.register_fn("kill_worker", WorkerContext::kill_worker);
 
         // --- DOM MANIPULATION APIS FOR RHAI ---
 
