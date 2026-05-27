@@ -83,10 +83,10 @@ impl KernelBridge {
         }
     }
     
-    /// Instantly allocates and distributes tasks mapped from a JSON array of strings
-    /// across idle Data Workers. Avoiding the overhead of sequential bridging.
-    pub fn spawn_workers_batch(&mut self, base_task_id: u32, payloads_json: &str) -> i32 {
-        if let Ok(payloads) = serde_json::from_str::<Vec<String>>(payloads_json) {
+    /// Instantly allocates and distributes tasks mapped from a JS Array of strings
+    /// across idle Data Workers. Zero-copy parsing via JsValue.
+    pub fn spawn_workers_batch(&mut self, base_task_id: u32, payloads_js: JsValue) -> i32 {
+        if let Ok(payloads) = serde_wasm_bindgen::from_value::<Vec<String>>(payloads_js) {
             let mut state = self.state.write().unwrap();
             let mut spawned_count = 0;
 
@@ -100,7 +100,7 @@ impl KernelBridge {
 
             spawned_count
         } else {
-            -1 // Parsing error
+            -1 // Deserialization error
         }
     }
 
@@ -121,13 +121,13 @@ impl KernelBridge {
         result
     }
 
-    /// Evaluates a JSON array representing a DAG of `ScriptNode` blocks.
+    /// Evaluates a JS Array representing a DAG of `ScriptNode` blocks.
     /// This brings advanced Pipeline behavior matching ComfyUI or LangChain
-    /// directly to the edge inside WASM.
-    pub fn eval_graph(&mut self, nodes_json: &str, start_node_id: &str) -> String {
+    /// directly to the edge inside WASM without heavy JSON parsing overhead.
+    pub fn eval_graph(&mut self, nodes_js: JsValue, start_node_id: &str) -> String {
         let start_time = Telemetry::start_timer();
 
-        let result = match serde_json::from_str::<Vec<ScriptNode>>(nodes_json) {
+        let result = match serde_wasm_bindgen::from_value::<Vec<ScriptNode>>(nodes_js) {
             Ok(nodes) => {
                 let mut state = self.state.write().unwrap();
                 let SharedState { field, workers, messages, env_grid, vector_mem, .. } = &mut *state;
@@ -148,7 +148,7 @@ impl KernelBridge {
                     Err(e) => e,
                 }
             },
-            Err(_) => "JSON Parsing Error: Invalid Graph Format".to_string(),
+            Err(_) => "JsValue Parsing Error: Invalid Graph Format".to_string(),
         };
 
         self.telemetry.record_script_eval(start_time);

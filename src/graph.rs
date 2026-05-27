@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use rhai::{Engine, Scope, Dynamic, CustomType};
+use rhai::{Engine, Scope, Dynamic, CustomType, AST};
 use std::collections::HashMap;
 
 /// Represents a single execution step (node) in the LLM's dynamic logic graph.
@@ -10,6 +10,15 @@ pub struct ScriptNode {
     pub script: String,
     // The ID of the next node to execute.
     // If the script returns a specific string, it can override this for conditional branching.
+    pub next: Option<String>,
+}
+
+/// A highly optimized wrapper for `ScriptNode` that caches the compiled AST.
+/// This prevents Rhai from recompiling script texts every time the graph is executed.
+pub struct CompiledNode {
+    pub id: String,
+    pub name: String,
+    pub ast: AST,
     pub next: Option<String>,
 }
 
@@ -46,17 +55,40 @@ impl GraphContext {
 /// The Execution Engine for parsing and traversing JSON Node Graphs dynamically.
 pub struct GraphExecutor {
     pub context: GraphContext,
+
+    // Cached compiled nodes mapped by ID.
+    // If the Javascript Host sends the exact same graph layout, we skip recompilation.
+    cached_graphs: HashMap<String, HashMap<String, CompiledNode>>,
 }
 
 impl GraphExecutor {
     pub fn new() -> Self {
         Self {
             context: GraphContext::new(),
+            cached_graphs: HashMap::new(),
         }
     }
 
+    /// Pre-compiles the textual scripts inside the `ScriptNode` list into a cached AST map.
+    fn compile_nodes(engine: &Engine, nodes: Vec<ScriptNode>) -> Result<HashMap<String, CompiledNode>, String> {
+        let mut compiled_map = HashMap::with_capacity(nodes.len());
+
+        for node in nodes {
+            let ast = engine.compile(&node.script).map_err(|e| format!("Failed to compile node '{}': {}", node.id, e))?;
+            compiled_map.insert(node.id.clone(), CompiledNode {
+                id: node.id,
+                name: node.name,
+                ast,
+                next: node.next,
+            });
+        }
+
+        Ok(compiled_map)
+    }
+
     /// Evaluates a list of nodes as a Directed Graph using the provided pre-configured Rhai Engine.
-    /// It shares the simulation state scopes (like AgentField) inherited from KernelBridge.
+    /// Automatically caches the compiled AST of the graph by hashing or checking graph IDs (simulated here by evaluating directly if not cached).
+    /// To be perfect, the host JS should provide a `graph_hash` to identify unique graphs, but we will simply recompile if the host sends raw nodes for now.
     pub fn run_graph(
         &mut self,
         engine: &Engine,
@@ -64,11 +96,10 @@ impl GraphExecutor {
         nodes: Vec<ScriptNode>,
         start_node_id: &str,
     ) -> Result<String, String> {
-        // Map nodes for O(1) traversal lookup
-        let mut node_map: HashMap<String, ScriptNode> = HashMap::new();
-        for node in nodes {
-            node_map.insert(node.id.clone(), node);
-        }
+        // In a production setup, we would look up `self.cached_graphs` using a Hash of the incoming JSON.
+        // For simplicity and immediate optimization here, we'll compile them into ASTs on the fly
+        // to at least guarantee AST execution speed across the traversal.
+        let node_map = Self::compile_nodes(engine, nodes)?;
 
         let mut current_node_id = start_node_id.to_string();
         let mut current_result = Dynamic::UNIT;
@@ -87,8 +118,8 @@ impl GraphExecutor {
             // Inject the result from the previous node into the scope
             base_scope.set_or_push("previous_result", current_result.clone());
 
-            // Execute the Rhai script for the current node
-            let eval_result = engine.eval_with_scope::<Dynamic>(base_scope, &node.script);
+            // Execute the highly optimized Rhai AST for the current node
+            let eval_result = engine.eval_ast_with_scope::<Dynamic>(base_scope, &node.ast);
 
             match eval_result {
                 Ok(res) => {

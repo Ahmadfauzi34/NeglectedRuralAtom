@@ -29,6 +29,7 @@ regex = "1.12.3"
 svg = "0.18.0"
 plotters = { version = "0.3.7", default-features = false, features = ["svg_backend", "line_series", "point_series"] }
 ndarray = "0.17.2"
+serde-wasm-bindgen = "0.6.5"
 # ====================
 
 [dependencies.web-sys]
