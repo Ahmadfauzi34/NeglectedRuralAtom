@@ -49,10 +49,10 @@ pub fn step_agents(field: &mut AgentField, config: &KernelConfig, grid: &mut Spa
         }
     }
 
-    // Pre-alloc accumulators di stack (bukan heap) — fixed size untuk branchless
-    let mut acc_x = vec![0.0f32; count]; // ini alloc tapi di luar hot loop
-    let mut acc_y = vec![0.0f32; count]; // untuk production, pakai pre-allocated scratch buffer
-    
+    // Reset pre-allocated accumulators without dropping capacity
+    field.acc_x[..count].fill(0.0);
+    field.acc_y[..count].fill(0.0);
+
     // Scratch buffer for neighbor querying to avoid per-agent allocation
     let mut neighbors_buf = Vec::with_capacity(64);
 
@@ -103,13 +103,13 @@ pub fn step_agents(field: &mut AgentField, config: &KernelConfig, grid: &mut Spa
         let n = neighbors.max(1) as f32;
         let n_inv = 1.0 / n;
         
-        acc_x[i] = (sep_x * config.separation_weight + 
-                    ali_x * config.alignment_weight * n_inv + 
-                    coh_x * config.cohesion_weight * n_inv) * dt;
+        field.acc_x[i] = (sep_x * config.separation_weight +
+                          ali_x * config.alignment_weight * n_inv +
+                          coh_x * config.cohesion_weight * n_inv) * dt;
                     
-        acc_y[i] = (sep_y * config.separation_weight + 
-                    ali_y * config.alignment_weight * n_inv + 
-                    coh_y * config.cohesion_weight * n_inv) * dt;
+        field.acc_y[i] = (sep_y * config.separation_weight +
+                          ali_y * config.alignment_weight * n_inv +
+                          coh_y * config.cohesion_weight * n_inv) * dt;
     }
     
     // === PASS 2: State Machine Execution & Integration ===
@@ -117,8 +117,8 @@ pub fn step_agents(field: &mut AgentField, config: &KernelConfig, grid: &mut Spa
         if field.active[i] == 0 { continue; }
         
         // Fetch explicit acceleration from boids physics
-        let mut ax = acc_x[i];
-        let mut ay = acc_y[i];
+        let mut ax = field.acc_x[i];
+        let mut ay = field.acc_y[i];
 
         // Apply behavior state overrides
         // 0 = Idle/Boids, 1 = Flee Center, 2 = Wander, 3 = Follow Environment Gradient (Pheromones)
