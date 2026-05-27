@@ -25,6 +25,8 @@ mod business;
 mod telemetry;
 #[path = "../src/graph.rs"]
 mod graph;
+#[path = "../src/svg_generator.rs"]
+mod svg_generator;
 
 use bridge::KernelBridge;
 

@@ -8,6 +8,7 @@ pub mod prompt;
 pub mod business;
 pub mod telemetry;
 pub mod graph;
+pub mod svg_generator;
 
 use wasm_bindgen::prelude::*;
 

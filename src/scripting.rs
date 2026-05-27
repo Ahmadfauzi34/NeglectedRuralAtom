@@ -3,6 +3,7 @@ use crate::field::{AgentField, DataWorkerField, MessageBus, EnvironmentGrid, vec
 use crate::dom::DomContext;
 use crate::business;
 use crate::telemetry::EngineMetrics;
+use crate::svg_generator::SvgGenerator;
 
 /// Safe sandboxed environment to evaluate dynamic scripts (e.g. from LLM).
 pub struct ScriptEngine {
@@ -421,6 +422,7 @@ impl ScriptEngine {
         engine.register_fn("regex_extract", business::regex_extract);
         engine.register_fn("regex_extract_all", business::regex_extract_all);
         engine.register_fn("sum_number_strings", business::sum_number_strings);
+        engine.register_fn("multiply_matrix_1d", business::multiply_matrix_1d);
 
         // --- TELEMETRY APIS FOR RHAI ---
         engine.build_type::<EngineMetrics>();
@@ -428,6 +430,37 @@ impl ScriptEngine {
         engine.register_fn("get_script_ms", |m: &mut EngineMetrics| -> f64 { m.scripting_eval_ms });
         engine.register_fn("get_active_workers", |m: &mut EngineMetrics| -> i64 { m.active_data_workers as i64 });
         engine.register_fn("get_arena_bytes", |m: &mut EngineMetrics| -> i64 { m.text_arena_bytes as i64 });
+
+        // --- SVG AND PLOTTING APIS FOR RHAI ---
+        // Allows LLM to directly draw radar or charts
+        engine.register_fn("svg_draw_radar", |cx: f32, cy: f32, positions: Array| -> String {
+            let mut rust_positions = Vec::new();
+            for item in positions {
+                // Expects an array of [x, y] coordinates
+                if let Ok(arr) = item.into_array() {
+                    if arr.len() >= 2 {
+                        let x = arr[0].as_float().unwrap_or(0.0) as f32;
+                        let y = arr[1].as_float().unwrap_or(0.0) as f32;
+                        rust_positions.push((x, y));
+                    }
+                }
+            }
+            SvgGenerator::build_radar_svg(cx, cy, &rust_positions)
+        });
+
+        engine.register_fn("svg_draw_line_chart", |title: &str, data: Array| -> String {
+            let mut rust_points = Vec::new();
+            for item in data {
+                if let Ok(arr) = item.into_array() {
+                    if arr.len() >= 2 {
+                        let x = arr[0].as_float().unwrap_or(0.0) as f32;
+                        let y = arr[1].as_float().unwrap_or(0.0) as f32;
+                        rust_points.push((x, y));
+                    }
+                }
+            }
+            SvgGenerator::build_line_chart_svg(&rust_points, title)
+        });
 
         // We can still keep utility functions
         engine.register_fn("render_html_card", |title: &str, content: &str| -> String {
