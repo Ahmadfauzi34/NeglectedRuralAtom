@@ -3,10 +3,11 @@ use crate::field::{AgentField, DataWorkerField, MessageBus, EnvironmentGrid, vec
 use crate::dom::DomContext;
 use crate::business;
 use crate::telemetry::EngineMetrics;
+use crate::svg_generator::SvgGenerator;
 
 /// Safe sandboxed environment to evaluate dynamic scripts (e.g. from LLM).
 pub struct ScriptEngine {
-    engine: Engine,
+    pub engine: Engine,
 }
 
 /// A wrapper pointer context to allow Rhai to safely manipulate the SOA AgentField.
@@ -172,6 +173,23 @@ impl WorkerContext {
     pub fn kill_worker(&mut self, idx: i64) {
         if idx >= 0 {
             self.get_workers().kill_worker(idx as usize);
+        }
+    }
+
+    pub fn get_worker_memory(&mut self, idx: i64, slot: i64) -> f64 {
+        if idx >= 0 && slot >= 0 && slot < 8 {
+            if let Some(mem) = self.get_workers().memory.get(idx as usize) {
+                return mem[slot as usize] as f64;
+            }
+        }
+        0.0
+    }
+
+    pub fn set_worker_memory(&mut self, idx: i64, slot: i64, value: f64) {
+        if idx >= 0 && slot >= 0 && slot < 8 {
+            if let Some(mem) = self.get_workers().memory.get_mut(idx as usize) {
+                mem[slot as usize] = value as f32;
+            }
         }
     }
 }
@@ -354,6 +372,8 @@ impl ScriptEngine {
         engine.register_fn("get_worker_payload", WorkerContext::get_worker_payload);
         engine.register_fn("set_worker_result", WorkerContext::set_worker_result);
         engine.register_fn("kill_worker", WorkerContext::kill_worker);
+        engine.register_fn("get_worker_memory", WorkerContext::get_worker_memory);
+        engine.register_fn("set_worker_memory", WorkerContext::set_worker_memory);
 
         // --- MESSAGE BUS APIS FOR RHAI ---
         engine.build_type::<MessageContext>();
@@ -421,6 +441,10 @@ impl ScriptEngine {
         engine.register_fn("regex_extract", business::regex_extract);
         engine.register_fn("regex_extract_all", business::regex_extract_all);
         engine.register_fn("sum_number_strings", business::sum_number_strings);
+        engine.register_fn("multiply_matrix_1d", business::multiply_matrix_1d);
+        engine.register_fn("dot_product", business::dot_product);
+        engine.register_fn("sigmoid", business::sigmoid);
+        engine.register_fn("q_learning_update", business::q_learning_update);
 
         // --- TELEMETRY APIS FOR RHAI ---
         engine.build_type::<EngineMetrics>();
@@ -428,6 +452,37 @@ impl ScriptEngine {
         engine.register_fn("get_script_ms", |m: &mut EngineMetrics| -> f64 { m.scripting_eval_ms });
         engine.register_fn("get_active_workers", |m: &mut EngineMetrics| -> i64 { m.active_data_workers as i64 });
         engine.register_fn("get_arena_bytes", |m: &mut EngineMetrics| -> i64 { m.text_arena_bytes as i64 });
+
+        // --- SVG AND PLOTTING APIS FOR RHAI ---
+        // Allows LLM to directly draw radar or charts
+        engine.register_fn("svg_draw_radar", |cx: f32, cy: f32, positions: Array| -> String {
+            let mut rust_positions = Vec::new();
+            for item in positions {
+                // Expects an array of [x, y] coordinates
+                if let Ok(arr) = item.into_array() {
+                    if arr.len() >= 2 {
+                        let x = arr[0].as_float().unwrap_or(0.0) as f32;
+                        let y = arr[1].as_float().unwrap_or(0.0) as f32;
+                        rust_positions.push((x, y));
+                    }
+                }
+            }
+            SvgGenerator::build_radar_svg(cx, cy, &rust_positions)
+        });
+
+        engine.register_fn("svg_draw_line_chart", |title: &str, data: Array| -> String {
+            let mut rust_points = Vec::new();
+            for item in data {
+                if let Ok(arr) = item.into_array() {
+                    if arr.len() >= 2 {
+                        let x = arr[0].as_float().unwrap_or(0.0) as f32;
+                        let y = arr[1].as_float().unwrap_or(0.0) as f32;
+                        rust_points.push((x, y));
+                    }
+                }
+            }
+            SvgGenerator::build_line_chart_svg(&rust_points, title)
+        });
 
         // We can still keep utility functions
         engine.register_fn("render_html_card", |title: &str, content: &str| -> String {
@@ -442,16 +497,24 @@ impl ScriptEngine {
     }
 
     /// Evaluates a Rhai script string and returns the resulting String.
-    /// Passes the contexts as dynamic variables to the script.
-    pub fn eval(&mut self, script: &str, field: &mut AgentField, workers: &mut DataWorkerField, messages: &mut MessageBus, env_grid: &mut EnvironmentGrid, vector_mem: &mut VectorMemory, metrics: EngineMetrics) -> Result<String, String> {
-        let mut scope = Scope::new();
-
-        // Push the contexts into the scope so the script can access them
+    /// Helper to inject memory bindings into a borrowed scope.
+    pub fn eval_with_injected_scope(
+        &mut self,
+        scope: &mut Scope,
+        script: &str,
+        field: &mut AgentField,
+        workers: &mut DataWorkerField,
+        messages: &mut MessageBus,
+        env_grid: &mut EnvironmentGrid,
+        vector_mem: &mut VectorMemory,
+        metrics: EngineMetrics
+    ) -> Result<String, String> {
         let f_ctx = FieldContext::new(field);
         let w_ctx = WorkerContext::new(workers);
         let m_ctx = MessageContext::new(messages);
         let e_ctx = EnvironmentContext::new(env_grid);
         let v_ctx = VectorMemoryContext::new(vector_mem);
+
         scope.push("field", f_ctx);
         scope.push("workers", w_ctx);
         scope.push("messages", m_ctx);
@@ -459,18 +522,23 @@ impl ScriptEngine {
         scope.push("vector_mem", v_ctx);
         scope.push("metrics", metrics);
 
-        // Execute the script and format the output as a string to return to JS
-        match self.engine.eval_with_scope::<Dynamic>(&mut scope, script) {
+        if script.is_empty() {
+            return Ok("".to_string());
+        }
+
+        match self.engine.eval_with_scope::<Dynamic>(scope, script) {
             Ok(result) => Ok(result.to_string()),
             Err(e) => {
-                // If it's just a variable not found (like when checking bindings in tests), return empty instead of failing
                 let err_str = e.to_string();
-                if err_str.contains("Function not found") || err_str.contains("Variable not found") {
-                    Err(format!("LLM Script Error: {}", err_str))
-                } else {
-                    Err(format!("LLM Script Error: {}", err_str))
-                }
-            },
+                Err(format!("LLM Script Error: {}", err_str))
+            }
         }
+    }
+
+    /// Evaluates a Rhai script string and returns the resulting String.
+    /// Passes the contexts as dynamic variables to the script.
+    pub fn eval(&mut self, script: &str, field: &mut AgentField, workers: &mut DataWorkerField, messages: &mut MessageBus, env_grid: &mut EnvironmentGrid, vector_mem: &mut VectorMemory, metrics: EngineMetrics) -> Result<String, String> {
+        let mut scope = Scope::new();
+        self.eval_with_injected_scope(&mut scope, script, field, workers, messages, env_grid, vector_mem, metrics)
     }
 }

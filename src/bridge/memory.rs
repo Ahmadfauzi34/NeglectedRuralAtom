@@ -7,6 +7,7 @@ use crate::render::{CanvasEncoder, agent_renderer::encode_agents, GpuBuffer};
 use crate::scripting::ScriptEngine;
 use crate::prompt::PromptBuilder;
 use crate::telemetry::Telemetry;
+use crate::graph::{GraphExecutor, ScriptNode};
 
 /// Represents the shared internal state of the simulation.
 /// Wrapped in Arc<RwLock> to allow async tasks (like LLM fetch)
@@ -35,6 +36,7 @@ pub struct KernelBridge {
     // Made internal to avoid wasm_bindgen trait issues with struct exposure.
     // We will expose it via a getter that returns a JSON string instead.
     telemetry: Telemetry,
+    graph_executor: GraphExecutor,
 }
 
 #[wasm_bindgen]
@@ -65,6 +67,7 @@ impl KernelBridge {
             prompt_builder: PromptBuilder::new(max_agents * 128), // 128 bytes roughly covers each agent printout
             use_webgl: false,
             telemetry: Telemetry::new(),
+            graph_executor: GraphExecutor::new(),
         }
     }
     
@@ -80,10 +83,10 @@ impl KernelBridge {
         }
     }
     
-    /// Instantly allocates and distributes tasks mapped from a JSON array of strings
-    /// across idle Data Workers. Avoiding the overhead of sequential bridging.
-    pub fn spawn_workers_batch(&mut self, base_task_id: u32, payloads_json: &str) -> i32 {
-        if let Ok(payloads) = serde_json::from_str::<Vec<String>>(payloads_json) {
+    /// Instantly allocates and distributes tasks mapped from a JS Array of strings
+    /// across idle Data Workers. Zero-copy parsing via JsValue.
+    pub fn spawn_workers_batch(&mut self, base_task_id: u32, payloads_js: JsValue) -> i32 {
+        if let Ok(payloads) = serde_wasm_bindgen::from_value::<Vec<String>>(payloads_js) {
             let mut state = self.state.write().unwrap();
             let mut spawned_count = 0;
 
@@ -97,7 +100,7 @@ impl KernelBridge {
 
             spawned_count
         } else {
-            -1 // Parsing error
+            -1 // Deserialization error
         }
     }
 
@@ -112,6 +115,40 @@ impl KernelBridge {
         let result = match self.script_engine.eval(script, field, workers, messages, env_grid, vector_mem, metrics_copy) {
             Ok(res) => res,
             Err(e) => e,
+        };
+
+        self.telemetry.record_script_eval(start_time);
+        result
+    }
+
+    /// Evaluates a JS Array representing a DAG of `ScriptNode` blocks.
+    /// This brings advanced Pipeline behavior matching ComfyUI or LangChain
+    /// directly to the edge inside WASM without heavy JSON parsing overhead.
+    pub fn eval_graph(&mut self, nodes_js: JsValue, start_node_id: &str) -> String {
+        let start_time = Telemetry::start_timer();
+
+        let result = match serde_wasm_bindgen::from_value::<Vec<ScriptNode>>(nodes_js) {
+            Ok(nodes) => {
+                let mut state = self.state.write().unwrap();
+                let SharedState { field, workers, messages, env_grid, vector_mem, .. } = &mut *state;
+                let metrics_copy = self.telemetry.metrics.clone();
+
+                let mut scope = rhai::Scope::new();
+                // We utilize the ScriptEngine's existing capability to inject field bindings into a base scope
+                match self.script_engine.eval_with_injected_scope(
+                    &mut scope, "", field, workers, messages, env_grid, vector_mem, metrics_copy
+                ) {
+                    Ok(_) => {
+                        // Base scope is now primed with `field`, `workers`, etc.
+                        match self.graph_executor.run_graph(&self.script_engine.engine, &mut scope, nodes, start_node_id) {
+                            Ok(res) => res,
+                            Err(e) => e,
+                        }
+                    },
+                    Err(e) => e,
+                }
+            },
+            Err(_) => "JsValue Parsing Error: Invalid Graph Format".to_string(),
         };
 
         self.telemetry.record_script_eval(start_time);
@@ -163,13 +200,16 @@ impl KernelBridge {
         self.use_webgl = use_webgl;
     }
 
-    pub fn set_config(&mut self, dt: f32, friction: f32, max_speed: f32, influence_radius: f32) {
+    pub fn set_config(&mut self, dt: f32, friction: f32, max_speed: f32, influence_radius: f32, cursor_x: f32, cursor_y: f32, cursor_weight: f32) {
         let mut state = self.state.write().unwrap();
         state.config = KernelConfig {
             dt,
             friction,
             max_speed,
             influence_radius,
+            cursor_x,
+            cursor_y,
+            cursor_weight,
             ..state.config
         };
     }
