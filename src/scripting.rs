@@ -175,6 +175,23 @@ impl WorkerContext {
             self.get_workers().kill_worker(idx as usize);
         }
     }
+
+    pub fn get_worker_memory(&mut self, idx: i64, slot: i64) -> f64 {
+        if idx >= 0 && slot >= 0 && slot < 8 {
+            if let Some(mem) = self.get_workers().memory.get(idx as usize) {
+                return mem[slot as usize] as f64;
+            }
+        }
+        0.0
+    }
+
+    pub fn set_worker_memory(&mut self, idx: i64, slot: i64, value: f64) {
+        if idx >= 0 && slot >= 0 && slot < 8 {
+            if let Some(mem) = self.get_workers().memory.get_mut(idx as usize) {
+                mem[slot as usize] = value as f32;
+            }
+        }
+    }
 }
 
 /// A wrapper pointer context to allow Rhai to safely manipulate the MessageBus.
@@ -355,6 +372,8 @@ impl ScriptEngine {
         engine.register_fn("get_worker_payload", WorkerContext::get_worker_payload);
         engine.register_fn("set_worker_result", WorkerContext::set_worker_result);
         engine.register_fn("kill_worker", WorkerContext::kill_worker);
+        engine.register_fn("get_worker_memory", WorkerContext::get_worker_memory);
+        engine.register_fn("set_worker_memory", WorkerContext::set_worker_memory);
 
         // --- MESSAGE BUS APIS FOR RHAI ---
         engine.build_type::<MessageContext>();
@@ -423,6 +442,9 @@ impl ScriptEngine {
         engine.register_fn("regex_extract_all", business::regex_extract_all);
         engine.register_fn("sum_number_strings", business::sum_number_strings);
         engine.register_fn("multiply_matrix_1d", business::multiply_matrix_1d);
+        engine.register_fn("dot_product", business::dot_product);
+        engine.register_fn("sigmoid", business::sigmoid);
+        engine.register_fn("q_learning_update", business::q_learning_update);
 
         // --- TELEMETRY APIS FOR RHAI ---
         engine.build_type::<EngineMetrics>();

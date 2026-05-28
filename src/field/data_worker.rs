@@ -17,6 +17,10 @@ pub struct DataWorkerField {
     pub(crate) task_ids: Vec<u32>,
     pub(crate) progress: Vec<f32>,
 
+    // Autonomy: Local Memory for Q-Learning or Neural Net Weights
+    // Each worker gets an 8-float array for extremely fast WASM native math
+    pub(crate) memory: Vec<[f32; 8]>,
+
     pub(crate) text_arena: String,
     pub(crate) payload_slices: Vec<(u32, u32)>,
     pub(crate) result_slices: Vec<(u32, u32)>,
@@ -39,6 +43,7 @@ impl DataWorkerField {
             states: vec![0; capacity],
             task_ids: vec![0; capacity],
             progress: vec![0.0; capacity],
+            memory: vec![[0.0; 8]; capacity],
             text_arena: String::with_capacity(capacity * 256),
             payload_slices: vec![(0, 0); capacity],
             result_slices: vec![(0, 0); capacity],

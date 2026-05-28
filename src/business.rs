@@ -100,3 +100,34 @@ pub fn multiply_matrix_1d(arr_a: Array, arr_b: Array) -> Array {
 
     out
 }
+
+/// Computes the Dot Product of two 1D Arrays.
+/// This acts as a fast linear Forward Pass for a single perceptron node.
+pub fn dot_product(arr_a: Array, arr_b: Array) -> f64 {
+    let mut dot = 0.0;
+    let len = arr_a.len().min(arr_b.len());
+    for i in 0..len {
+        let mut a = 0.0;
+        let mut b = 0.0;
+
+        if let Ok(f) = arr_a[i].as_float() { a = f; }
+        else if let Ok(v) = arr_a[i].as_int() { a = v as f64; }
+
+        if let Ok(f) = arr_b[i].as_float() { b = f; }
+        else if let Ok(v) = arr_b[i].as_int() { b = v as f64; }
+
+        dot += a * b;
+    }
+    dot
+}
+
+/// Applies the Sigmoid activation function commonly used in neural nets.
+pub fn sigmoid(x: f64) -> f64 {
+    1.0 / (1.0 + (-x).exp())
+}
+
+/// Updates a Q-Learning Table value using the Bellman Equation directly in Rust WASM.
+/// q_current = q_current + learning_rate * (reward + discount_factor * max_future_q - q_current)
+pub fn q_learning_update(q_current: f64, reward: f64, max_future_q: f64, learning_rate: f64, discount_factor: f64) -> f64 {
+    q_current + learning_rate * (reward + discount_factor * max_future_q - q_current)
+}
