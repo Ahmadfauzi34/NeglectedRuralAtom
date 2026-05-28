@@ -1,5 +1,6 @@
 use rhai::{Engine, Scope, Dynamic, CustomType, Array};
 use crate::field::{AgentField, DataWorkerField, MessageBus, EnvironmentGrid, vector_memory::VectorMemory, BROADCAST_ID};
+use crate::field::tensor_logic::{Tensor3D, SpectralCore, ZeroParamBridge, OrthogonalFusion};
 use crate::dom::DomContext;
 use crate::business;
 use crate::telemetry::EngineMetrics;
@@ -452,6 +453,22 @@ impl ScriptEngine {
         engine.register_fn("get_script_ms", |m: &mut EngineMetrics| -> f64 { m.scripting_eval_ms });
         engine.register_fn("get_active_workers", |m: &mut EngineMetrics| -> i64 { m.active_data_workers as i64 });
         engine.register_fn("get_arena_bytes", |m: &mut EngineMetrics| -> i64 { m.text_arena_bytes as i64 });
+
+        // --- TENSOR LOGIC / ASYMMETRIC SPARSE CORE APIS FOR RHAI ---
+        engine.build_type::<Tensor3D>();
+        engine.register_fn("tensor_zeros", Tensor3D::zeros);
+
+        engine.build_type::<SpectralCore>();
+        engine.register_fn("spectral_core", SpectralCore::new);
+        engine.register_fn("forward_sparse", SpectralCore::forward_sparse);
+
+        engine.build_type::<ZeroParamBridge>();
+        engine.register_fn("zero_param_bridge", ZeroParamBridge::new);
+        engine.register_fn("forward", ZeroParamBridge::forward);
+
+        engine.build_type::<OrthogonalFusion>();
+        engine.register_fn("orthogonal_fusion", OrthogonalFusion::new);
+        engine.register_fn("fuse_sparse", OrthogonalFusion::fuse_sparse);
 
         // --- SVG AND PLOTTING APIS FOR RHAI ---
         // Allows LLM to directly draw radar or charts

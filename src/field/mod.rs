@@ -5,6 +5,7 @@ pub mod data_worker;
 pub mod message_bus;
 pub mod environment_grid;
 pub mod vector_memory;
+pub mod tensor_logic;
 
 pub use soa::AgentField;
 pub use data_worker::DataWorkerField;
