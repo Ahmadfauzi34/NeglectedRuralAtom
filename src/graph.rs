@@ -8,9 +8,10 @@ pub struct ScriptNode {
     pub id: String,
     pub name: String,
     pub script: String,
-    // The ID of the next node to execute.
-    // If the script returns a specific string, it can override this for conditional branching.
-    pub next: Option<String>,
+    // The IDs of the next nodes to execute.
+    // If there are multiple, they are spawned in parallel via Data Worker Swarm.
+    #[serde(default)]
+    pub next: Vec<String>,
 }
 
 /// A highly optimized wrapper for `ScriptNode` that caches the compiled AST.
@@ -19,7 +20,7 @@ pub struct CompiledNode {
     pub id: String,
     pub name: String,
     pub ast: AST,
-    pub next: Option<String>,
+    pub next: Vec<String>,
 }
 
 /// The Shared Context allowing Stateful Intelligence across graph nodes.
@@ -102,49 +103,52 @@ impl GraphExecutor {
         // to at least guarantee AST execution speed across the traversal.
         let node_map = Self::compile_nodes(engine, nodes)?;
 
-        let mut current_node_id = start_node_id.to_string();
-        let mut current_result = Dynamic::UNIT;
+        let mut queue = std::collections::VecDeque::new();
+        queue.push_back((start_node_id.to_string(), Dynamic::UNIT));
+
+        let mut final_result = Dynamic::UNIT;
         let mut execution_steps = 0;
         let max_steps = 1000; // Prevent infinite loops in cyclical graphs
 
         // Push our GraphContext into the scope to act as global memory
         base_scope.push("graph_ctx", self.context.clone());
 
-        while let Some(node) = node_map.get(&current_node_id) {
+        // Process queue (Breadth-First for Parallel conceptual execution)
+        while let Some((current_node_id, incoming_result)) = queue.pop_front() {
             if execution_steps > max_steps {
                 return Err("Graph execution exceeded max steps (Infinite Loop?)".to_string());
             }
             execution_steps += 1;
 
-            // Inject the result from the previous node into the scope
-            base_scope.set_or_push("previous_result", current_result.clone());
+            if let Some(node) = node_map.get(&current_node_id) {
+                // Inject the result from the previous node into the scope
+                base_scope.set_or_push("previous_result", incoming_result);
 
-            // Execute the highly optimized Rhai AST for the current node
-            let eval_result = engine.eval_ast_with_scope::<Dynamic>(base_scope, &node.ast);
+                // Execute the highly optimized Rhai AST for the current node
+                let eval_result = engine.eval_ast_with_scope::<Dynamic>(base_scope, &node.ast);
 
-            match eval_result {
-                Ok(res) => {
-                    current_result = res.clone();
+                match eval_result {
+                    Ok(res) => {
+                        final_result = res.clone();
 
-                    // Branching Logic:
-                    // If the script returns a string that explicitly matches another node's ID, branch to it.
-                    // Otherwise, proceed to the static `next` node defined in the JSON.
-                    if let Ok(branch_id) = res.into_string() {
-                        if node_map.contains_key(&branch_id) {
-                            current_node_id = branch_id;
-                            continue;
+                        // Branching Logic:
+                        // If the script returns a string that explicitly matches another node's ID, branch to it.
+                        // Otherwise, spawn ALL `next` nodes in parallel to the execution queue.
+                        if let Ok(branch_id) = res.clone().into_string() {
+                            if node_map.contains_key(&branch_id) {
+                                queue.push_back((branch_id, res.clone()));
+                                continue;
+                            }
+                        }
+
+                        // Distribute parallel branches to the queue
+                        for next_id in &node.next {
+                            queue.push_back((next_id.clone(), res.clone()));
                         }
                     }
-
-                    if let Some(next_id) = &node.next {
-                        current_node_id = next_id.clone();
-                    } else {
-                        // End of graph
-                        break;
+                    Err(e) => {
+                        return Err(format!("ERROR in node '{}' ({}): {}", node.id, node.name, e));
                     }
-                }
-                Err(e) => {
-                    return Err(format!("ERROR in node '{}' ({}): {}", node.id, node.name, e));
                 }
             }
         }
@@ -154,6 +158,6 @@ impl GraphExecutor {
             self.context = ctx;
         }
 
-        Ok(current_result.to_string())
+        Ok(final_result.to_string())
     }
 }
