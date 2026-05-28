@@ -19,6 +19,14 @@ pub struct AgentField {
     pub(crate) target_id: Vec<u32>,
     pub(crate) active: Vec<u8>,     // 0 = mati (ghost), 1 = aktif
     
+    // Behavior / State Machine memory
+    // 0 = Idle, 1 = Wandering, 2 = Chasing, 3 = Fleeing
+    pub(crate) behavior_state: Vec<u8>,
+
+    // Pre-allocated scratch buffers for physics iteration to enforce Zero-Allocation in hot loop
+    pub(crate) acc_x: Vec<f32>,
+    pub(crate) acc_y: Vec<f32>,
+
     // Ghost state tracking
     pub(crate) len: usize,
     pub(crate) capacity: usize,
@@ -36,6 +44,9 @@ impl AgentField {
             health: Vec::with_capacity(initial_capacity),
             target_id: Vec::with_capacity(initial_capacity),
             active: Vec::with_capacity(initial_capacity),
+            behavior_state: Vec::with_capacity(initial_capacity),
+            acc_x: Vec::with_capacity(initial_capacity),
+            acc_y: Vec::with_capacity(initial_capacity),
             len: 0,
             capacity: initial_capacity,
         }
@@ -51,6 +62,9 @@ impl AgentField {
         self.health.reserve(new_cap.saturating_sub(self.health.capacity()));
         self.target_id.reserve(new_cap.saturating_sub(self.target_id.capacity()));
         self.active.reserve(new_cap.saturating_sub(self.active.capacity()));
+        self.behavior_state.reserve(new_cap.saturating_sub(self.behavior_state.capacity()));
+        self.acc_x.reserve(new_cap.saturating_sub(self.acc_x.capacity()));
+        self.acc_y.reserve(new_cap.saturating_sub(self.acc_y.capacity()));
         self.capacity = self.pos_x.capacity();
     }
     
@@ -70,6 +84,9 @@ impl AgentField {
         self.health.push(health);
         self.target_id.push(u32::MAX); // none
         self.active.push(1);
+        self.behavior_state.push(0); // Idle default
+        self.acc_x.push(0.0);
+        self.acc_y.push(0.0);
         
         self.len += 1;
         idx
@@ -89,6 +106,9 @@ impl AgentField {
             self.health.swap(idx, last);
             self.target_id.swap(idx, last);
             self.active.swap(idx, last);
+            self.behavior_state.swap(idx, last);
+            self.acc_x.swap(idx, last);
+            self.acc_y.swap(idx, last);
         }
         
         // Ghost: data di 'last' sekarang invalid, tapi buffer tetap ada

@@ -5,23 +5,28 @@ use crate::field::{AgentField, KernelConfig};
 #[serde(tag = "cmd")]
 pub enum Command {
     #[serde(rename = "spawn")]
-    Spawn { x: f32, y: f32, vx: f32, vy: f32, health: f32, color: u32 },
+    Spawn { x: f32, y: f32, vx: f32, vy: f32, health: f32, #[allow(dead_code)] color: u32 },
     
     #[serde(rename = "kill")]
     Kill { idx: usize },
     
     #[serde(rename = "config")]
-    Config { dt: f32, friction: f32, max_speed: f32, influence_radius: f32 },
+    Config {
+        dt: f32, friction: f32, max_speed: f32, influence_radius: f32,
+        #[serde(default)] cursor_x: f32,
+        #[serde(default)] cursor_y: f32,
+        #[serde(default)] cursor_weight: f32
+    },
     
     #[serde(rename = "clear")]
     Clear,
     
     #[serde(rename = "batch")]
-    Batch(Vec<<Command>),  // <-- FIX: hapus <
+    Batch(Vec<Command>),  // <-- FIX: hapus <
 }
 
 pub struct CommandBus {
-    queue: Vec<<Command>,  // <-- FIX: hapus <
+    queue: Vec<Command>,  // <-- FIX: hapus <
 }
 
 impl CommandBus {
@@ -36,14 +41,17 @@ impl CommandBus {
     }
     
     pub fn parse_batch(&mut self, json: &str) -> Result<(), serde_json::Error> {
-        let cmds: Vec<<Command> = serde_json::from_str(json)?;  // <-- FIX: hapus <
+        let cmds: Vec<Command> = serde_json::from_str(json)?;  // <-- FIX: hapus <
         self.queue.extend(cmds);
         Ok(())
     }
     
     pub fn execute(&mut self, field: &mut AgentField, config: &mut KernelConfig) {
         // Drain + iterasi — hindari alloc
-        for cmd in self.queue.drain(..) {
+        // We need to collect the drained commands first or process batch commands differently
+        // to avoid mutable borrow alias
+        let cmds = std::mem::take(&mut self.queue);
+        for cmd in cmds {
             match cmd {
                 Command::Spawn { x, y, vx, vy, health, color: _ } => {
                     let idx = field.spawn(x, y, health);
@@ -53,12 +61,15 @@ impl CommandBus {
                     }
                 }
                 Command::Kill { idx } => field.kill_swap(idx),
-                Command::Config { dt, friction, max_speed, influence_radius } => {
+                Command::Config { dt, friction, max_speed, influence_radius, cursor_x, cursor_y, cursor_weight } => {
                     *config = KernelConfig {
                         dt,
                         friction,
                         max_speed,
                         influence_radius,
+                        cursor_x,
+                        cursor_y,
+                        cursor_weight,
                         ..*config
                     };
                 }

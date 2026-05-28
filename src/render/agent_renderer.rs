@@ -1,4 +1,4 @@
-use super::{CanvasEncoder, TAG_CIRCLE, TAG_LINE};
+use super::CanvasEncoder;
 use crate::field::soa::AgentField;
 
 /// System: encode agent field ke draw commands.
