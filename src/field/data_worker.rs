@@ -1,6 +1,7 @@
 /// State of a Data Worker.
 #[repr(u8)]
 #[derive(Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code)]
 pub enum WorkerState {
     Idle = 0,
     Working = 1,

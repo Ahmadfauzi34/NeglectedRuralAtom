@@ -1,6 +1,5 @@
 use svg::Document;
-use svg::node::element::{Circle, Rectangle, Text as SvgText, Path};
-use svg::node::Text;
+use svg::node::element::{Circle, Rectangle};
 use plotters::prelude::*;
 
 /// A utility module exposing quick SVG and charting generators to the LLM Sandbox.

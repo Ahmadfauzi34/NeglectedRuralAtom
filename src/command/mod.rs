@@ -5,13 +5,18 @@ use crate::field::{AgentField, KernelConfig};
 #[serde(tag = "cmd")]
 pub enum Command {
     #[serde(rename = "spawn")]
-    Spawn { x: f32, y: f32, vx: f32, vy: f32, health: f32, color: u32 },
+    Spawn { x: f32, y: f32, vx: f32, vy: f32, health: f32, #[allow(dead_code)] color: u32 },
     
     #[serde(rename = "kill")]
     Kill { idx: usize },
     
     #[serde(rename = "config")]
-    Config { dt: f32, friction: f32, max_speed: f32, influence_radius: f32 },
+    Config {
+        dt: f32, friction: f32, max_speed: f32, influence_radius: f32,
+        #[serde(default)] cursor_x: f32,
+        #[serde(default)] cursor_y: f32,
+        #[serde(default)] cursor_weight: f32
+    },
     
     #[serde(rename = "clear")]
     Clear,
@@ -56,12 +61,15 @@ impl CommandBus {
                     }
                 }
                 Command::Kill { idx } => field.kill_swap(idx),
-                Command::Config { dt, friction, max_speed, influence_radius } => {
+                Command::Config { dt, friction, max_speed, influence_radius, cursor_x, cursor_y, cursor_weight } => {
                     *config = KernelConfig {
                         dt,
                         friction,
                         max_speed,
                         influence_radius,
+                        cursor_x,
+                        cursor_y,
+                        cursor_weight,
                         ..*config
                     };
                 }

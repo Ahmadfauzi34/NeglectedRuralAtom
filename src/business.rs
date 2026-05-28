@@ -1,7 +1,7 @@
 use rhai::Array;
 use serde_json::Value;
 use regex::Regex;
-use ndarray::{Array1, Array2};
+use ndarray::Array1;
 
 /// Extracts a specific string value from a raw JSON payload using a top-level key.
 /// Returns an empty string if the key doesn't exist or parsing fails.

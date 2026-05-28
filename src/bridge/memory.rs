@@ -200,13 +200,16 @@ impl KernelBridge {
         self.use_webgl = use_webgl;
     }
 
-    pub fn set_config(&mut self, dt: f32, friction: f32, max_speed: f32, influence_radius: f32) {
+    pub fn set_config(&mut self, dt: f32, friction: f32, max_speed: f32, influence_radius: f32, cursor_x: f32, cursor_y: f32, cursor_weight: f32) {
         let mut state = self.state.write().unwrap();
         state.config = KernelConfig {
             dt,
             friction,
             max_speed,
             influence_radius,
+            cursor_x,
+            cursor_y,
+            cursor_weight,
             ..state.config
         };
     }

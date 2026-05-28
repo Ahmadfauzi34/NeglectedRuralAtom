@@ -58,6 +58,7 @@ pub struct GraphExecutor {
 
     // Cached compiled nodes mapped by ID.
     // If the Javascript Host sends the exact same graph layout, we skip recompilation.
+    #[allow(dead_code)]
     cached_graphs: HashMap<String, HashMap<String, CompiledNode>>,
 }
 

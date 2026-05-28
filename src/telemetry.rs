@@ -1,6 +1,7 @@
 use serde::Serialize;
-use web_sys::window;
 use rhai::CustomType;
+#[cfg(target_arch = "wasm32")]
+use web_sys::window;
 
 /// A structure to hold precise performance and memory metrics
 /// for the WebAssembly simulation engine.
@@ -22,6 +23,7 @@ pub struct Telemetry {
     pub metrics: EngineMetrics,
 
     // Internal counters
+    #[allow(dead_code)]
     last_frame_time: f64,
 }
 

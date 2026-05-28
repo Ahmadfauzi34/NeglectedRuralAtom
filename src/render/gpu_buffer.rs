@@ -39,6 +39,7 @@ impl GpuBuffer {
         self.data.len()
     }
 
+    #[allow(dead_code)]
     pub fn instance_count(&self) -> usize {
         self.data.len() / 4
     }
