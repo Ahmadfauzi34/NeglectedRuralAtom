@@ -480,8 +480,8 @@ impl ScriptEngine {
         engine.register_fn("canvas_rect", |cx: &mut RenderContext, x: f64, y: f64, w: f64, h: f64, c: i64| cx.rect(x, y, w, h, c));
 
         // --- SVG AND PLOTTING APIS FOR RHAI ---
-        // Allows LLM to directly draw radar or charts
-        engine.register_fn("svg_draw_radar", |cx: f32, cy: f32, positions: Array| -> String {
+        // Allows LLM to dynamically generate generic statistical charts
+        engine.register_fn("svg_draw_scatter", |cx: f32, cy: f32, positions: Array| -> String {
             let mut rust_positions = Vec::new();
             for item in positions {
                 // Expects an array of [x, y] coordinates
@@ -493,7 +493,7 @@ impl ScriptEngine {
                     }
                 }
             }
-            SvgGenerator::build_radar_svg(cx, cy, &rust_positions)
+            SvgGenerator::build_scatter_svg(cx, cy, &rust_positions)
         });
 
         engine.register_fn("svg_draw_line_chart", |title: &str, data: Array| -> String {
