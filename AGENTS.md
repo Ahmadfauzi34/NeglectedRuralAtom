@@ -37,3 +37,23 @@ Sistem dapat memproses Prompt LLM secara asinkronus agar UI Javascript tidak *fr
 * **Implementasi:**
   1. Bungkus state dalam `Arc<RwLock<SharedState>>`.
   2. Peringatan Host JS: Jika `reserve()` di Rust memicu perluasan memori (memory grow), pointer `Float32Array` Javascript akan *detached*. Eksekusi pointer-getter WASM wajib dilakukan secara *late binding* (tepat di dalam animation frame) untuk menghindari pointer yang kedaluwarsa.
+## 7. Asymmetric TRM Core (Sparse Edition)
+Kerangka logika tensor (Tensor-Logic) dipisahkan secara modular untuk efisiensi komputasi *Edge/Browser*. Arsitektur Neural Network tidak digabungkan dalam satu "Black Box", melainkan diurai ke dalam modul fungsional:
+* **SpectralCore**: Pemrosesan *sparse forward* dengan *energy-gating* untuk melewatkan perhitungan pita yang redundan.
+* **ZeroParamBridge**: Pola *Cross-Attention* tanpa bobot parameter untuk menerjemahkan data spasial (Y) dan logika (Z).
+* **OrthogonalFusion**: Penggabungan fitur dengan optimasi *Early-Exit*.
+* **Zero-Copy Tensors**: Semua objek `ndarray::Array3<f32>` dibungkus dalam `Arc` melalui tipe `Tensor3D` agar *script* Rhai dapat memanipulasi *graph/pipeline* tanpa melakukan alokasi atau kloning array memori matriks yang masif.
+
+## 8. Autonomous Data Worker Swarm
+Swarm bukan sekadar "kendaraan visual", tapi otak kolektif.
+* **Memori Internal (SOA Float Array)**: Setiap *Data Worker* mengelola status otonomnya melalui `memory: Vec<[f32; 8]>`. Ini memungkinkan agen menyimpan skor *Q-Learning* atau bobot *Multi-Layer Perceptron (MLP)* murni di WASM, bebas fragmentasi.
+* **Native Math Operations**: Eksekusi *inference* (`dot_product`, `sigmoid`) dan pembaruan Reinforcement Learning (`q_learning_update`) disediakan secara native di Rust (via modul `business.rs`) untuk dipanggil dari *script* Rhai. Hindari *round-trip* komunikasi JS <-> WASM <-> API LLM untuk setiap *data point*.
+
+## 9. Parallel Graph Node Execution (DAG)
+Logika *Pipeline* (Pohon Keputusan LLM) diproses menggunakan `GraphExecutor` berbasis AST (*Abstract Syntax Tree*) *Caching*.
+* **Evolusi Breadth-First**: *Node* tidak lagi dijalankan sebagai rantai sekuensial mutlak. Mendukung percabangan banyak node (`next: Vec<String>`) yang didorong ke *VecDeque* antrean BFS, merepresentasikan eksekusi paralel.
+* **Global Graph Context**: Semua cabang berbagi memori bersama (`GraphContext`) untuk melacak status global (seperti *accumulator*).
+
+## 10. Contextual Meta-Learning & Deep Reflective Loops
+Infrastruktur telah ditingkatkan (*headroom* maksimum mencapai 50.000 iterasi graf dan 1.000.000 operasi *engine*) untuk memungkinkan "Agent Reflective Cycles".
+* **Context Evolution**: Menggunakan `context_evolution` (basis *Orthogonal Projection*) agen tidak hanya mengoptimalkan kecepatan, tetapi secara bertahap belajar menyelaraskan matriks internal mereka (*Agent Context*) terhadap pemahaman holistik kerangka kerja (*Broader Context*). *Infinite loop protection* dirancang pasif, agen memutar simulasi `while` mereka secara otonom di ruang WASM.

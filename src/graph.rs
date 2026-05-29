@@ -89,8 +89,7 @@ impl GraphExecutor {
     }
 
     /// Evaluates a list of nodes as a Directed Graph using the provided pre-configured Rhai Engine.
-    /// Automatically caches the compiled AST of the graph by hashing or checking graph IDs (simulated here by evaluating directly if not cached).
-    /// To be perfect, the host JS should provide a `graph_hash` to identify unique graphs, but we will simply recompile if the host sends raw nodes for now.
+    /// Automatically caches the compiled AST of the graph by hashing the graph IDs and script lengths.
     pub fn run_graph(
         &mut self,
         engine: &Engine,
@@ -98,10 +97,21 @@ impl GraphExecutor {
         nodes: Vec<ScriptNode>,
         start_node_id: &str,
     ) -> Result<String, String> {
-        // In a production setup, we would look up `self.cached_graphs` using a Hash of the incoming JSON.
-        // For simplicity and immediate optimization here, we'll compile them into ASTs on the fly
-        // to at least guarantee AST execution speed across the traversal.
-        let node_map = Self::compile_nodes(engine, nodes)?;
+        // 1. Generate a lightweight structural hash for caching
+        let mut graph_hash = String::with_capacity(nodes.len() * 16);
+        for n in &nodes {
+            graph_hash.push_str(&n.id);
+            graph_hash.push_str(&n.script.len().to_string());
+        }
+
+        // 2. Compile if not cached
+        if !self.cached_graphs.contains_key(&graph_hash) {
+            let compiled = Self::compile_nodes(engine, nodes)?;
+            self.cached_graphs.insert(graph_hash.clone(), compiled);
+        }
+
+        // 3. Fetch from cache
+        let node_map = self.cached_graphs.get(&graph_hash).unwrap();
 
         let mut queue = std::collections::VecDeque::new();
         queue.push_back((start_node_id.to_string(), Dynamic::UNIT));

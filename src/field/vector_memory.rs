@@ -11,6 +11,9 @@ pub struct VectorMemory {
     // A flattened 1D array representing a 2D matrix of embeddings (count * EMBEDDING_DIM)
     pub(crate) vectors: Vec<f32>,
 
+    // Cached magnitudes to speed up cosine similarity
+    pub(crate) magnitudes: Vec<f32>,
+
     pub(crate) len: usize,
 }
 
@@ -19,6 +22,7 @@ impl VectorMemory {
         Self {
             memory_ids: Vec::with_capacity(capacity),
             vectors: Vec::with_capacity(capacity * EMBEDDING_DIM),
+            magnitudes: Vec::with_capacity(capacity),
             len: 0,
         }
     }
@@ -31,6 +35,10 @@ impl VectorMemory {
 
         self.memory_ids.push(memory_id.to_string());
         self.vectors.extend_from_slice(vector);
+
+        let mag_sq: f32 = vector.iter().map(|v| v * v).sum();
+        self.magnitudes.push(mag_sq.sqrt() + 1e-6);
+
         self.len += 1;
     }
 
@@ -65,8 +73,7 @@ impl VectorMemory {
             let target_vec = &self.vectors[start..start + EMBEDDING_DIM];
 
             let dot = self.dot_product(query_vector, target_vec);
-            let target_mag_sq: f32 = target_vec.iter().map(|v| v * v).sum();
-            let target_mag = target_mag_sq.sqrt() + 1e-6;
+            let target_mag = self.magnitudes[i];
 
             let cosine_similarity = dot / (query_mag * target_mag);
 
@@ -82,6 +89,7 @@ impl VectorMemory {
     pub fn clear(&mut self) {
         self.memory_ids.clear();
         self.vectors.clear();
+        self.magnitudes.clear();
         self.len = 0;
     }
 }

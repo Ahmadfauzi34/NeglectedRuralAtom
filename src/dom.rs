@@ -1,4 +1,4 @@
-use web_sys::{window, Document, HtmlElement, HtmlInputElement};
+use web_sys::{window, Document, HtmlElement, HtmlInputElement, HtmlCanvasElement, CanvasRenderingContext2d};
 use wasm_bindgen::JsCast;
 
 /// A utility module exposing safe wrappers around `web-sys` DOM manipulation.
@@ -69,6 +69,42 @@ impl DomContext {
             } else {
                 Err(format!("Element '{}' is not an HtmlInputElement", target_id))
             }
+        } else {
+            Err(format!("Element with id '{}' not found", target_id))
+        }
+    }
+
+    /// Directly calls a Canvas 2D Context API to fill a rectangle from WASM.
+    pub fn canvas_fill_rect(&self, target_id: &str, x: f64, y: f64, w: f64, h: f64, fill_style: &str) -> Result<(), String> {
+        if let Some(el) = self.document.get_element_by_id(target_id) {
+            if let Ok(canvas) = el.dyn_into::<HtmlCanvasElement>() {
+                if let Ok(Some(ctx_obj)) = canvas.get_context("2d") {
+                    if let Ok(ctx) = ctx_obj.dyn_into::<CanvasRenderingContext2d>() {
+                        #[allow(deprecated)]
+                        ctx.set_fill_style(&fill_style.into());
+                        ctx.fill_rect(x, y, w, h);
+                        return Ok(());
+                    }
+                }
+            }
+            Err(format!("Element '{}' is not a valid Canvas 2D", target_id))
+        } else {
+            Err(format!("Element with id '{}' not found", target_id))
+        }
+    }
+
+    /// Clears a Canvas 2D context from WASM.
+    pub fn canvas_clear_rect(&self, target_id: &str, x: f64, y: f64, w: f64, h: f64) -> Result<(), String> {
+        if let Some(el) = self.document.get_element_by_id(target_id) {
+            if let Ok(canvas) = el.dyn_into::<HtmlCanvasElement>() {
+                if let Ok(Some(ctx_obj)) = canvas.get_context("2d") {
+                    if let Ok(ctx) = ctx_obj.dyn_into::<CanvasRenderingContext2d>() {
+                        ctx.clear_rect(x, y, w, h);
+                        return Ok(());
+                    }
+                }
+            }
+            Err(format!("Element '{}' is not a valid Canvas 2D", target_id))
         } else {
             Err(format!("Element with id '{}' not found", target_id))
         }

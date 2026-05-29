@@ -5,6 +5,7 @@ use crate::dom::DomContext;
 use crate::business;
 use crate::telemetry::EngineMetrics;
 use crate::svg_generator::SvgGenerator;
+use crate::render::CanvasEncoder;
 
 /// Safe sandboxed environment to evaluate dynamic scripts (e.g. from LLM).
 pub struct ScriptEngine {
@@ -437,6 +438,22 @@ impl ScriptEngine {
             }
         });
 
+        engine.register_fn("dom_canvas_fill_rect", |target_id: &str, x: f64, y: f64, w: f64, h: f64, fill_style: &str| -> Result<(), String> {
+            if let Some(dom) = DomContext::new() {
+                dom.canvas_fill_rect(target_id, x, y, w, h, fill_style)
+            } else {
+                Err("DOM Context unavailable".to_string())
+            }
+        });
+
+        engine.register_fn("dom_canvas_clear_rect", |target_id: &str, x: f64, y: f64, w: f64, h: f64| -> Result<(), String> {
+            if let Some(dom) = DomContext::new() {
+                dom.canvas_clear_rect(target_id, x, y, w, h)
+            } else {
+                Err("DOM Context unavailable".to_string())
+            }
+        });
+
         // --- BUSINESS ANALYTICS APIS FOR RHAI ---
         engine.register_fn("json_extract_string", business::json_extract_string);
         engine.register_fn("regex_extract", business::regex_extract);
@@ -471,9 +488,16 @@ impl ScriptEngine {
         engine.register_fn("orthogonal_fusion", OrthogonalFusion::new);
         engine.register_fn("fuse_sparse", OrthogonalFusion::fuse_sparse);
 
+        // --- RENDER CONTEXT APIS FOR RHAI ---
+        engine.build_type::<RenderContext>();
+        engine.register_fn("canvas_clear", |cx: &mut RenderContext| cx.clear());
+        engine.register_fn("canvas_circle", |cx: &mut RenderContext, x: f64, y: f64, r: f64, c: i64| cx.circle(x, y, r, c));
+        engine.register_fn("canvas_line", |cx: &mut RenderContext, x1: f64, y1: f64, x2: f64, y2: f64, c: i64| cx.line(x1, y1, x2, y2, c));
+        engine.register_fn("canvas_rect", |cx: &mut RenderContext, x: f64, y: f64, w: f64, h: f64, c: i64| cx.rect(x, y, w, h, c));
+
         // --- SVG AND PLOTTING APIS FOR RHAI ---
-        // Allows LLM to directly draw radar or charts
-        engine.register_fn("svg_draw_radar", |cx: f32, cy: f32, positions: Array| -> String {
+        // Allows LLM to dynamically generate generic statistical charts
+        engine.register_fn("svg_draw_scatter", |cx: f32, cy: f32, positions: Array| -> String {
             let mut rust_positions = Vec::new();
             for item in positions {
                 // Expects an array of [x, y] coordinates
@@ -485,7 +509,7 @@ impl ScriptEngine {
                     }
                 }
             }
-            SvgGenerator::build_radar_svg(cx, cy, &rust_positions)
+            SvgGenerator::build_scatter_svg(cx, cy, &rust_positions)
         });
 
         engine.register_fn("svg_draw_line_chart", |title: &str, data: Array| -> String {
@@ -501,6 +525,8 @@ impl ScriptEngine {
             }
             SvgGenerator::build_line_chart_svg(&rust_points, title)
         });
+
+        engine.register_fn("svg_foreign_object", SvgGenerator::build_foreign_object_svg);
 
         // We can still keep utility functions
         engine.register_fn("render_html_card", |title: &str, content: &str| -> String {
@@ -525,6 +551,7 @@ impl ScriptEngine {
         messages: &mut MessageBus,
         env_grid: &mut EnvironmentGrid,
         vector_mem: &mut VectorMemory,
+        encoder: &mut CanvasEncoder,
         metrics: EngineMetrics
     ) -> Result<String, String> {
         let f_ctx = FieldContext::new(field);
@@ -532,12 +559,14 @@ impl ScriptEngine {
         let m_ctx = MessageContext::new(messages);
         let e_ctx = EnvironmentContext::new(env_grid);
         let v_ctx = VectorMemoryContext::new(vector_mem);
+        let r_ctx = RenderContext::new(encoder);
 
         scope.push("field", f_ctx);
         scope.push("workers", w_ctx);
         scope.push("messages", m_ctx);
         scope.push("env_grid", e_ctx);
         scope.push("vector_mem", v_ctx);
+        scope.push("canvas", r_ctx);
         scope.push("metrics", metrics);
 
         if script.is_empty() {
@@ -555,8 +584,43 @@ impl ScriptEngine {
 
     /// Evaluates a Rhai script string and returns the resulting String.
     /// Passes the contexts as dynamic variables to the script.
-    pub fn eval(&mut self, script: &str, field: &mut AgentField, workers: &mut DataWorkerField, messages: &mut MessageBus, env_grid: &mut EnvironmentGrid, vector_mem: &mut VectorMemory, metrics: EngineMetrics) -> Result<String, String> {
+    pub fn eval(&mut self, script: &str, field: &mut AgentField, workers: &mut DataWorkerField, messages: &mut MessageBus, env_grid: &mut EnvironmentGrid, vector_mem: &mut VectorMemory, encoder: &mut CanvasEncoder, metrics: EngineMetrics) -> Result<String, String> {
         let mut scope = Scope::new();
-        self.eval_with_injected_scope(&mut scope, script, field, workers, messages, env_grid, vector_mem, metrics)
+        self.eval_with_injected_scope(&mut scope, script, field, workers, messages, env_grid, vector_mem, encoder, metrics)
+    }
+}
+
+/// A wrapper pointer context to allow Rhai to safely command the CanvasEncoder.
+#[derive(Clone, CustomType)]
+pub struct RenderContext {
+    ptr: *mut CanvasEncoder,
+}
+
+impl RenderContext {
+    pub fn new(encoder: &mut CanvasEncoder) -> Self {
+        Self {
+            ptr: encoder as *mut CanvasEncoder,
+        }
+    }
+
+    #[inline]
+    fn get_encoder(&mut self) -> &mut CanvasEncoder {
+        unsafe { &mut *self.ptr }
+    }
+
+    pub fn clear(&mut self) {
+        self.get_encoder().clear();
+    }
+
+    pub fn circle(&mut self, x: f64, y: f64, r: f64, color: i64) {
+        self.get_encoder().circle(x as f32, y as f32, r as f32, color as u32);
+    }
+
+    pub fn line(&mut self, x1: f64, y1: f64, x2: f64, y2: f64, color: i64) {
+        self.get_encoder().line(x1 as f32, y1 as f32, x2 as f32, y2 as f32, color as u32);
+    }
+
+    pub fn rect(&mut self, x: f64, y: f64, w: f64, h: f64, color: i64) {
+        self.get_encoder().rect(x as f32, y as f32, w as f32, h as f32, color as u32);
     }
 }
