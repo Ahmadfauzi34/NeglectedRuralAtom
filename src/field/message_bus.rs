@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 /// Constant to define a broadcast message meant for all agents
 pub const BROADCAST_ID: u32 = u32::MAX;
 
@@ -12,6 +14,9 @@ pub struct MessageBus {
     pub(crate) text_arena: String,
     pub(crate) payload_slices: Vec<(u32, u32)>,
 
+    // O(1) Indexing for rapid queries
+    pub(crate) receiver_index: HashMap<u32, Vec<usize>>,
+
     pub(crate) len: usize,
 }
 
@@ -23,6 +28,7 @@ impl MessageBus {
             message_types: Vec::with_capacity(initial_capacity),
             text_arena: String::with_capacity(initial_capacity * 64),
             payload_slices: Vec::with_capacity(initial_capacity),
+            receiver_index: HashMap::with_capacity(initial_capacity),
             len: 0,
         }
     }
@@ -33,22 +39,34 @@ impl MessageBus {
         self.text_arena.push_str(payload);
         let p_end = self.text_arena.len() as u32;
 
+        let current_idx = self.len;
+
         self.sender_ids.push(sender_id);
         self.receiver_ids.push(receiver_id);
         self.message_types.push(msg_type);
         self.payload_slices.push((p_start, p_end));
 
+        // Populate fast lookup index
+        self.receiver_index.entry(receiver_id).or_insert_with(Vec::new).push(current_idx);
+
         self.len += 1;
     }
 
     /// Retrieves all messages meant for a specific receiver.
-    /// Includes point-to-point and broadcast messages.
+    /// Includes point-to-point and broadcast messages via O(1) lookup.
     /// Fills the provided output buffer with indices of the matching messages.
     pub fn query_messages(&self, receiver_id: u32, out_indices: &mut Vec<usize>) {
         out_indices.clear();
-        for i in 0..self.len {
-            if self.receiver_ids[i] == receiver_id || self.receiver_ids[i] == BROADCAST_ID {
-                out_indices.push(i);
+
+        // 1. Fetch exact matches
+        if let Some(indices) = self.receiver_index.get(&receiver_id) {
+            out_indices.extend_from_slice(indices);
+        }
+
+        // 2. Fetch broadcasts
+        if receiver_id != BROADCAST_ID {
+            if let Some(broadcasts) = self.receiver_index.get(&BROADCAST_ID) {
+                out_indices.extend_from_slice(broadcasts);
             }
         }
     }
@@ -71,6 +89,7 @@ impl MessageBus {
         self.message_types.clear();
         self.payload_slices.clear();
         self.text_arena.clear();
+        self.receiver_index.clear();
         self.len = 0;
     }
 }

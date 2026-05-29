@@ -1,19 +1,30 @@
 use rhai::Array;
-use serde_json::Value;
 use regex::Regex;
 use ndarray::Array1;
+use std::cell::RefCell;
+use std::collections::HashMap;
+
+thread_local! {
+    static REGEX_CACHE: RefCell<HashMap<String, Regex>> = RefCell::new(HashMap::new());
+}
 
 /// Extracts a specific string value from a raw JSON payload using a top-level key.
 /// Returns an empty string if the key doesn't exist or parsing fails.
-/// This prevents heavy allocations of parsing the entire JSON object back into Rhai types.
+/// This relies on a fast string search instead of parsing the entire DOM to avoid heavy allocations.
 pub fn json_extract_string(json_str: &str, key: &str) -> String {
-    if let Ok(val) = serde_json::from_str::<Value>(json_str) {
-        if let Some(field) = val.get(key) {
-            if let Some(s) = field.as_str() {
-                return s.to_string();
-            } else {
-                return field.to_string(); // Fallback to raw representation
+    let search_key = format!("\"{}\":", key);
+    if let Some(start_idx) = json_str.find(&search_key) {
+        let value_start = start_idx + search_key.len();
+        let slice = &json_str[value_start..];
+
+        // Very basic string extraction for flat JSON fields (ignores nested objects)
+        let trimmed = slice.trim_start();
+        if trimmed.starts_with('"') {
+            if let Some(end_idx) = trimmed[1..].find('"') {
+                return trimmed[1..=end_idx].to_string();
             }
+        } else if let Some(end_idx) = trimmed.find(|c| c == ',' || c == '}') {
+            return trimmed[..end_idx].trim().to_string();
         }
     }
     String::new()
@@ -21,23 +32,39 @@ pub fn json_extract_string(json_str: &str, key: &str) -> String {
 
 /// Matches a regex pattern against a payload and returns the first match found.
 pub fn regex_extract(pattern: &str, text: &str) -> String {
-    if let Ok(re) = Regex::new(pattern) {
-        if let Some(mat) = re.find(text) {
-            return mat.as_str().to_string();
+    REGEX_CACHE.with(|cache_ref| {
+        let mut cache = cache_ref.borrow_mut();
+        if !cache.contains_key(pattern) {
+            if let Ok(re) = Regex::new(pattern) {
+                cache.insert(pattern.to_string(), re);
+            }
         }
-    }
-    String::new()
+        if let Some(re) = cache.get(pattern) {
+            if let Some(mat) = re.find(text) {
+                return mat.as_str().to_string();
+            }
+        }
+        String::new()
+    })
 }
 
 /// Matches a regex pattern against a payload and returns all matches as a Rhai Array.
 pub fn regex_extract_all(pattern: &str, text: &str) -> Array {
-    let mut results = Array::new();
-    if let Ok(re) = Regex::new(pattern) {
-        for mat in re.find_iter(text) {
-            results.push(mat.as_str().to_string().into());
+    REGEX_CACHE.with(|cache_ref| {
+        let mut cache = cache_ref.borrow_mut();
+        if !cache.contains_key(pattern) {
+            if let Ok(re) = Regex::new(pattern) {
+                cache.insert(pattern.to_string(), re);
+            }
         }
-    }
-    results
+        let mut results = Array::new();
+        if let Some(re) = cache.get(pattern) {
+            for mat in re.find_iter(text) {
+                results.push(mat.as_str().to_string().into());
+            }
+        }
+        results
+    })
 }
 
 /// Aggregates multiple number strings into a sum.
