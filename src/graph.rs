@@ -108,7 +108,7 @@ impl GraphExecutor {
 
         let mut final_result = Dynamic::UNIT;
         let mut execution_steps = 0;
-        let max_steps = 1000; // Prevent infinite loops in cyclical graphs
+        let max_steps = 50_000; // Expanded to safely allow for deep autonomous while loops/eval cycles
 
         // Push our GraphContext into the scope to act as global memory
         base_scope.push("graph_ctx", self.context.clone());

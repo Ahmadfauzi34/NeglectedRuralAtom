@@ -446,6 +446,7 @@ impl ScriptEngine {
         engine.register_fn("dot_product", business::dot_product);
         engine.register_fn("sigmoid", business::sigmoid);
         engine.register_fn("q_learning_update", business::q_learning_update);
+        engine.register_fn("context_evolution", business::context_evolution);
 
         // --- TELEMETRY APIS FOR RHAI ---
         engine.build_type::<EngineMetrics>();
@@ -507,7 +508,7 @@ impl ScriptEngine {
         });
 
         // Security limits:
-        engine.set_max_operations(10_000); // Prevent infinite loops from bad LLM scripts
+        engine.set_max_operations(1_000_000); // Expanded to allow deep learning/while loops before aborting
         engine.set_max_string_size(50_000); // Prevent memory exhaustion
 
         Self { engine }
