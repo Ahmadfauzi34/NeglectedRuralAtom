@@ -131,3 +131,63 @@ pub fn sigmoid(x: f64) -> f64 {
 pub fn q_learning_update(q_current: f64, reward: f64, max_future_q: f64, learning_rate: f64, discount_factor: f64) -> f64 {
     q_current + learning_rate * (reward + discount_factor * max_future_q - q_current)
 }
+
+/// Contextual Meta-Learning (Context Evolution) via Orthogonal Projection.
+/// Allows an agent to evolve its understanding by finding the "novelty" in the broader context
+/// (the orthogonal rejection) and shifting its internal vector towards it.
+pub fn context_evolution(agent_context: Array, broader_context: Array, learning_rate: f64) -> Array {
+    let mut vec_a = Vec::with_capacity(agent_context.len());
+    let mut vec_b = Vec::with_capacity(broader_context.len());
+
+    for item in agent_context {
+        if let Ok(f) = item.as_float() { vec_a.push(f as f64); }
+        else if let Ok(i) = item.as_int() { vec_a.push(i as f64); }
+        else { vec_a.push(0.0); }
+    }
+
+    for item in broader_context {
+        if let Ok(f) = item.as_float() { vec_b.push(f as f64); }
+        else if let Ok(i) = item.as_int() { vec_b.push(i as f64); }
+        else { vec_b.push(0.0); }
+    }
+
+    let len = vec_a.len().min(vec_b.len());
+    if len == 0 {
+        return rhai::Array::new();
+    }
+
+    // 1. Calculate dot product (Overlap / Current Understanding)
+    let mut dot_a_b = 0.0;
+    let mut dot_a_a = 0.0;
+    for i in 0..len {
+        dot_a_b += vec_a[i] * vec_b[i];
+        dot_a_a += vec_a[i] * vec_a[i];
+    }
+
+    // Prevent division by zero
+    if dot_a_a < 1e-8 {
+        dot_a_a = 1.0;
+    }
+
+    // 2. Projection of Broader Context onto Agent Context (What is already known)
+    let scalar = dot_a_b / dot_a_a;
+    let mut projection = vec![0.0; len];
+    for i in 0..len {
+        projection[i] = vec_a[i] * scalar;
+    }
+
+    // 3. Orthogonal Rejection (The "Novelty" or "Broader Framework" missing from the agent)
+    let mut novelty = vec![0.0; len];
+    for i in 0..len {
+        novelty[i] = vec_b[i] - projection[i];
+    }
+
+    // 4. Evolve the agent's context towards the novelty
+    let mut out = rhai::Array::new();
+    for i in 0..len {
+        let evolved_value = vec_a[i] + (novelty[i] * learning_rate);
+        out.push(evolved_value.into());
+    }
+
+    out
+}
