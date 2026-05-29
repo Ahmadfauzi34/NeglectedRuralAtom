@@ -112,7 +112,7 @@ impl KernelBridge {
         let SharedState { field, workers, messages, env_grid, vector_mem, .. } = &mut *state;
         let metrics_copy = self.telemetry.metrics.clone();
 
-        let result = match self.script_engine.eval(script, field, workers, messages, env_grid, vector_mem, metrics_copy) {
+        let result = match self.script_engine.eval(script, field, workers, messages, env_grid, vector_mem, &mut self.encoder, metrics_copy) {
             Ok(res) => res,
             Err(e) => e,
         };
@@ -136,7 +136,7 @@ impl KernelBridge {
                 let mut scope = rhai::Scope::new();
                 // We utilize the ScriptEngine's existing capability to inject field bindings into a base scope
                 match self.script_engine.eval_with_injected_scope(
-                    &mut scope, "", field, workers, messages, env_grid, vector_mem, metrics_copy
+                    &mut scope, "", field, workers, messages, env_grid, vector_mem, &mut self.encoder, metrics_copy
                 ) {
                     Ok(_) => {
                         // Base scope is now primed with `field`, `workers`, etc.
@@ -220,7 +220,8 @@ impl KernelBridge {
 
         // Record structural counts into telemetry
         self.telemetry.metrics.active_physics_agents = state.field.agent_count();
-        self.telemetry.metrics.active_data_workers = state.workers.len - state.workers.free_slots.len();
+        // Prevent overflow if free_slots is larger than len (e.g. initialization)
+        self.telemetry.metrics.active_data_workers = state.workers.len.saturating_sub(state.workers.free_slots.len());
         self.telemetry.metrics.text_arena_bytes = state.workers.text_arena.len();
         self.telemetry.metrics.total_messages = state.messages.len;
         self.telemetry.metrics.memory_vector_count = state.vector_mem.len;
