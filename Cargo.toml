@@ -46,6 +46,8 @@ features = [
   "HtmlInputElement",
   "CssStyleDeclaration",
   "Node",
+  "HtmlCanvasElement",
+  "CanvasRenderingContext2d",
 ]
 
 [profile.release]

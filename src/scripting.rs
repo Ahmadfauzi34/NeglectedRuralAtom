@@ -438,6 +438,22 @@ impl ScriptEngine {
             }
         });
 
+        engine.register_fn("dom_canvas_fill_rect", |target_id: &str, x: f64, y: f64, w: f64, h: f64, fill_style: &str| -> Result<(), String> {
+            if let Some(dom) = DomContext::new() {
+                dom.canvas_fill_rect(target_id, x, y, w, h, fill_style)
+            } else {
+                Err("DOM Context unavailable".to_string())
+            }
+        });
+
+        engine.register_fn("dom_canvas_clear_rect", |target_id: &str, x: f64, y: f64, w: f64, h: f64| -> Result<(), String> {
+            if let Some(dom) = DomContext::new() {
+                dom.canvas_clear_rect(target_id, x, y, w, h)
+            } else {
+                Err("DOM Context unavailable".to_string())
+            }
+        });
+
         // --- BUSINESS ANALYTICS APIS FOR RHAI ---
         engine.register_fn("json_extract_string", business::json_extract_string);
         engine.register_fn("regex_extract", business::regex_extract);
@@ -509,6 +525,8 @@ impl ScriptEngine {
             }
             SvgGenerator::build_line_chart_svg(&rust_points, title)
         });
+
+        engine.register_fn("svg_foreign_object", SvgGenerator::build_foreign_object_svg);
 
         // We can still keep utility functions
         engine.register_fn("render_html_card", |title: &str, content: &str| -> String {

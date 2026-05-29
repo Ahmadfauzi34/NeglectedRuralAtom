@@ -61,6 +61,23 @@ impl SvgGenerator {
         String::from_utf8(out).unwrap_or_default()
     }
 
+    /// Wraps standard HTML within an SVG `<foreignObject>`.
+    /// This allows LLMs to embed complex HTML components (like forms, canvases, videos) inside SVG visualizations.
+    pub fn build_foreign_object_svg(width: f32, height: f32, inner_html: &str) -> String {
+        format!(
+            r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {width} {height}" width="100%" height="100%">
+  <foreignObject x="0" y="0" width="{width}" height="{height}">
+    <div xmlns="http://www.w3.org/1999/xhtml" style="width: 100%; height: 100%;">
+      {html}
+    </div>
+  </foreignObject>
+</svg>"#,
+            width = width,
+            height = height,
+            html = inner_html
+        )
+    }
+
     /// Uses the `plotters` library to draw a sophisticated line chart for any generic numeric series.
     /// Generates the raw SVG string that can be injected into the DOM.
     pub fn build_line_chart_svg(data_points: &[(f32, f32)], title: &str) -> String {
