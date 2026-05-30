@@ -109,10 +109,10 @@ impl KernelBridge {
         let start_time = Telemetry::start_timer();
 
         let mut state = self.state.write().unwrap();
-        let SharedState { field, workers, messages, env_grid, vector_mem, .. } = &mut *state;
+        let SharedState { field, workers, messages, env_grid, vector_mem, config, .. } = &mut *state;
         let metrics_copy = self.telemetry.metrics.clone();
 
-        let result = match self.script_engine.eval(script, field, workers, messages, env_grid, vector_mem, &mut self.encoder, metrics_copy) {
+        let result = match self.script_engine.eval(script, field, workers, messages, env_grid, vector_mem, &mut self.encoder, config, metrics_copy) {
             Ok(res) => res,
             Err(e) => e,
         };
@@ -130,13 +130,13 @@ impl KernelBridge {
         let result = match serde_wasm_bindgen::from_value::<Vec<ScriptNode>>(nodes_js) {
             Ok(nodes) => {
                 let mut state = self.state.write().unwrap();
-                let SharedState { field, workers, messages, env_grid, vector_mem, .. } = &mut *state;
+                let SharedState { field, workers, messages, env_grid, vector_mem, config, .. } = &mut *state;
                 let metrics_copy = self.telemetry.metrics.clone();
 
                 let mut scope = rhai::Scope::new();
                 // We utilize the ScriptEngine's existing capability to inject field bindings into a base scope
                 match self.script_engine.eval_with_injected_scope(
-                    &mut scope, "", field, workers, messages, env_grid, vector_mem, &mut self.encoder, metrics_copy
+                    &mut scope, "", field, workers, messages, env_grid, vector_mem, &mut self.encoder, config, metrics_copy
                 ) {
                     Ok(_) => {
                         // Base scope is now primed with `field`, `workers`, etc.
