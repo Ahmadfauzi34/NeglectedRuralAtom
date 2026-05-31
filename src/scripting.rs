@@ -39,19 +39,19 @@ impl FieldContext {
         self.get_field().len as i64
     }
 
-    pub fn get_x(&mut self, idx: i64) -> f32 {
+    pub fn get_x(&mut self, idx: i64) -> f64 {
         let field = self.get_field();
         if idx >= 0 {
-            field.pos_x.get(idx as usize).copied().unwrap_or(0.0)
+            field.pos_x.get(idx as usize).copied().unwrap_or(0.0) as f64
         } else {
             0.0
         }
     }
 
-    pub fn get_y(&mut self, idx: i64) -> f32 {
+    pub fn get_y(&mut self, idx: i64) -> f64 {
         let field = self.get_field();
         if idx >= 0 {
-            field.pos_y.get(idx as usize).copied().unwrap_or(0.0)
+            field.pos_y.get(idx as usize).copied().unwrap_or(0.0) as f64
         } else {
             0.0
         }
@@ -75,19 +75,40 @@ impl FieldContext {
         }
     }
 
-    pub fn set_velocity(&mut self, idx: i64, vx: f32, vy: f32) {
+    pub fn set_pos(&mut self, idx: i64, x: f64, y: f64) {
         let field = self.get_field();
         if idx >= 0 {
             let u_idx = idx as usize;
-            if let (Some(vx_ref), Some(vy_ref)) = (field.vel_x.get_mut(u_idx), field.vel_y.get_mut(u_idx)) {
-                *vx_ref = vx;
-                *vy_ref = vy;
+            if let (Some(x_ref), Some(y_ref)) = (field.pos_x.get_mut(u_idx), field.pos_y.get_mut(u_idx)) {
+                *x_ref = x as f32;
+                *y_ref = y as f32;
             }
         }
     }
 
-    pub fn spawn(&mut self, x: f32, y: f32, health: f32) -> i64 {
-        self.get_field().spawn(x, y, health) as i64
+    pub fn set_health(&mut self, idx: i64, health: f64) {
+        let field = self.get_field();
+        if idx >= 0 {
+            let u_idx = idx as usize;
+            if let Some(h_ref) = field.health.get_mut(u_idx) {
+                *h_ref = health as f32;
+            }
+        }
+    }
+
+    pub fn set_velocity(&mut self, idx: i64, vx: f64, vy: f64) {
+        let field = self.get_field();
+        if idx >= 0 {
+            let u_idx = idx as usize;
+            if let (Some(vx_ref), Some(vy_ref)) = (field.vel_x.get_mut(u_idx), field.vel_y.get_mut(u_idx)) {
+                *vx_ref = vx as f32;
+                *vy_ref = vy as f32;
+            }
+        }
+    }
+
+    pub fn spawn(&mut self, x: f64, y: f64, health: f64) -> i64 {
+        self.get_field().spawn(x as f32, y as f32, health as f32) as i64
     }
 
     pub fn kill(&mut self, idx: i64) {
@@ -353,8 +374,10 @@ impl ScriptEngine {
         engine.register_fn("get_behavior", FieldContext::get_behavior);
         engine.register_fn("set_behavior", FieldContext::set_behavior);
         engine.register_fn("set_velocity", FieldContext::set_velocity);
-        engine.register_fn("spawn", FieldContext::spawn);
-        engine.register_fn("kill", FieldContext::kill);
+        engine.register_fn("set_pos", FieldContext::set_pos);
+        engine.register_fn("set_health", FieldContext::set_health);
+        engine.register_fn("agent_spawn", FieldContext::spawn);
+        engine.register_fn("agent_kill", FieldContext::kill);
 
         // Expose field object methods directly so script can call field.get_x(...)
         engine.register_fn("get_count", |ctx: &mut FieldContext| ctx.get_count());
@@ -362,9 +385,11 @@ impl ScriptEngine {
         engine.register_fn("get_y", |ctx: &mut FieldContext, idx: i64| ctx.get_y(idx));
         engine.register_fn("get_behavior", |ctx: &mut FieldContext, idx: i64| ctx.get_behavior(idx));
         engine.register_fn("set_behavior", |ctx: &mut FieldContext, idx: i64, state: i64| ctx.set_behavior(idx, state));
-        engine.register_fn("set_velocity", |ctx: &mut FieldContext, idx: i64, vx: f32, vy: f32| ctx.set_velocity(idx, vx, vy));
-        engine.register_fn("spawn", |ctx: &mut FieldContext, x: f32, y: f32, health: f32| ctx.spawn(x, y, health));
-        engine.register_fn("kill", |ctx: &mut FieldContext, idx: i64| ctx.kill(idx));
+        engine.register_fn("set_velocity", |ctx: &mut FieldContext, idx: i64, vx: f64, vy: f64| ctx.set_velocity(idx, vx, vy));
+        engine.register_fn("set_pos", |ctx: &mut FieldContext, idx: i64, x: f64, y: f64| ctx.set_pos(idx, x, y));
+        engine.register_fn("set_health", |ctx: &mut FieldContext, idx: i64, health: f64| ctx.set_health(idx, health));
+        engine.register_fn("agent_spawn", |ctx: &mut FieldContext, x: f64, y: f64, health: f64| ctx.spawn(x, y, health));
+        engine.register_fn("agent_kill", |ctx: &mut FieldContext, idx: i64| ctx.kill(idx));
 
         // --- WORKER AGENT APIS FOR RHAI ---
         engine.build_type::<WorkerContext>();
@@ -397,6 +422,30 @@ impl ScriptEngine {
         engine.register_fn("mem_search", VectorMemoryContext::search);
 
         // --- DOM MANIPULATION APIS FOR RHAI ---
+
+        engine.register_fn("dom_get_html", |target_id: &str| -> Result<String, String> {
+            if let Some(dom) = DomContext::new() {
+                dom.get_html(target_id)
+            } else {
+                Err("DOM Context unavailable".to_string())
+            }
+        });
+
+        engine.register_fn("dom_insert_html", |target_id: &str, position: &str, html: &str| -> Result<(), String> {
+            if let Some(dom) = DomContext::new() {
+                dom.insert_html_at(target_id, position, html)
+            } else {
+                Err("DOM Context unavailable".to_string())
+            }
+        });
+
+        engine.register_fn("dom_diff_replace_html", |target_id: &str, old_str: &str, new_str: &str| -> Result<bool, String> {
+            if let Some(dom) = DomContext::new() {
+                dom.diff_and_replace_html(target_id, old_str, new_str)
+            } else {
+                Err("DOM Context unavailable".to_string())
+            }
+        });
 
         engine.register_fn("dom_append_html", |target_id: &str, html: &str| -> Result<(), String> {
             if let Some(dom) = DomContext::new() {
@@ -454,6 +503,14 @@ impl ScriptEngine {
             }
         });
 
+        engine.register_fn("dom_canvas_draw_text", |target_id: &str, text: &str, x: f64, y: f64, font: &str, color: &str| -> Result<(), String> {
+            if let Some(dom) = DomContext::new() {
+                dom.canvas_draw_text(target_id, text, x, y, font, color)
+            } else {
+                Err("DOM Context unavailable".to_string())
+            }
+        });
+
         // --- BUSINESS ANALYTICS APIS FOR RHAI ---
         engine.register_fn("json_extract_string", business::json_extract_string);
         engine.register_fn("regex_extract", business::regex_extract);
@@ -494,6 +551,12 @@ impl ScriptEngine {
         engine.register_fn("canvas_circle", |cx: &mut RenderContext, x: f64, y: f64, r: f64, c: i64| cx.circle(x, y, r, c));
         engine.register_fn("canvas_line", |cx: &mut RenderContext, x1: f64, y1: f64, x2: f64, y2: f64, c: i64| cx.line(x1, y1, x2, y2, c));
         engine.register_fn("canvas_rect", |cx: &mut RenderContext, x: f64, y: f64, w: f64, h: f64, c: i64| cx.rect(x, y, w, h, c));
+
+        // --- KERNEL CONFIG APIS FOR RHAI ---
+        engine.build_type::<ConfigContext>();
+        engine.register_fn("get_cursor_x", ConfigContext::get_cursor_x);
+        engine.register_fn("get_cursor_y", ConfigContext::get_cursor_y);
+        engine.register_fn("get_cursor_weight", ConfigContext::get_cursor_weight);
 
         // --- SVG AND PLOTTING APIS FOR RHAI ---
         // Allows LLM to dynamically generate generic statistical charts
@@ -552,6 +615,7 @@ impl ScriptEngine {
         env_grid: &mut EnvironmentGrid,
         vector_mem: &mut VectorMemory,
         encoder: &mut CanvasEncoder,
+        config: &crate::field::KernelConfig,
         metrics: EngineMetrics
     ) -> Result<String, String> {
         let f_ctx = FieldContext::new(field);
@@ -560,6 +624,7 @@ impl ScriptEngine {
         let e_ctx = EnvironmentContext::new(env_grid);
         let v_ctx = VectorMemoryContext::new(vector_mem);
         let r_ctx = RenderContext::new(encoder);
+        let k_ctx = ConfigContext::new(config);
 
         scope.push("field", f_ctx);
         scope.push("workers", w_ctx);
@@ -567,6 +632,7 @@ impl ScriptEngine {
         scope.push("env_grid", e_ctx);
         scope.push("vector_mem", v_ctx);
         scope.push("canvas", r_ctx);
+        scope.push("kernel", k_ctx);
         scope.push("metrics", metrics);
 
         if script.is_empty() {
@@ -584,9 +650,9 @@ impl ScriptEngine {
 
     /// Evaluates a Rhai script string and returns the resulting String.
     /// Passes the contexts as dynamic variables to the script.
-    pub fn eval(&mut self, script: &str, field: &mut AgentField, workers: &mut DataWorkerField, messages: &mut MessageBus, env_grid: &mut EnvironmentGrid, vector_mem: &mut VectorMemory, encoder: &mut CanvasEncoder, metrics: EngineMetrics) -> Result<String, String> {
+    pub fn eval(&mut self, script: &str, field: &mut AgentField, workers: &mut DataWorkerField, messages: &mut MessageBus, env_grid: &mut EnvironmentGrid, vector_mem: &mut VectorMemory, encoder: &mut CanvasEncoder, config: &crate::field::KernelConfig, metrics: EngineMetrics) -> Result<String, String> {
         let mut scope = Scope::new();
-        self.eval_with_injected_scope(&mut scope, script, field, workers, messages, env_grid, vector_mem, encoder, metrics)
+        self.eval_with_injected_scope(&mut scope, script, field, workers, messages, env_grid, vector_mem, encoder, config, metrics)
     }
 }
 
@@ -622,5 +688,36 @@ impl RenderContext {
 
     pub fn rect(&mut self, x: f64, y: f64, w: f64, h: f64, color: i64) {
         self.get_encoder().rect(x as f32, y as f32, w as f32, h as f32, color as u32);
+    }
+}
+
+/// A wrapper pointer context to allow Rhai to safely read the Kernel Config.
+#[derive(Clone, CustomType)]
+pub struct ConfigContext {
+    ptr: *const crate::field::KernelConfig,
+}
+
+impl ConfigContext {
+    pub fn new(config: &crate::field::KernelConfig) -> Self {
+        Self {
+            ptr: config as *const _,
+        }
+    }
+
+    #[inline]
+    fn get_config(&self) -> &crate::field::KernelConfig {
+        unsafe { &*self.ptr }
+    }
+
+    pub fn get_cursor_x(&mut self) -> f64 {
+        self.get_config().cursor_x as f64
+    }
+
+    pub fn get_cursor_y(&mut self) -> f64 {
+        self.get_config().cursor_y as f64
+    }
+
+    pub fn get_cursor_weight(&mut self) -> f64 {
+        self.get_config().cursor_weight as f64
     }
 }
