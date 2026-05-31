@@ -423,6 +423,30 @@ impl ScriptEngine {
 
         // --- DOM MANIPULATION APIS FOR RHAI ---
 
+        engine.register_fn("dom_get_html", |target_id: &str| -> Result<String, String> {
+            if let Some(dom) = DomContext::new() {
+                dom.get_html(target_id)
+            } else {
+                Err("DOM Context unavailable".to_string())
+            }
+        });
+
+        engine.register_fn("dom_insert_html", |target_id: &str, position: &str, html: &str| -> Result<(), String> {
+            if let Some(dom) = DomContext::new() {
+                dom.insert_html_at(target_id, position, html)
+            } else {
+                Err("DOM Context unavailable".to_string())
+            }
+        });
+
+        engine.register_fn("dom_diff_replace_html", |target_id: &str, old_str: &str, new_str: &str| -> Result<bool, String> {
+            if let Some(dom) = DomContext::new() {
+                dom.diff_and_replace_html(target_id, old_str, new_str)
+            } else {
+                Err("DOM Context unavailable".to_string())
+            }
+        });
+
         engine.register_fn("dom_append_html", |target_id: &str, html: &str| -> Result<(), String> {
             if let Some(dom) = DomContext::new() {
                 dom.append_html(target_id, html)
@@ -474,6 +498,14 @@ impl ScriptEngine {
         engine.register_fn("dom_canvas_clear_rect", |target_id: &str, x: f64, y: f64, w: f64, h: f64| -> Result<(), String> {
             if let Some(dom) = DomContext::new() {
                 dom.canvas_clear_rect(target_id, x, y, w, h)
+            } else {
+                Err("DOM Context unavailable".to_string())
+            }
+        });
+
+        engine.register_fn("dom_canvas_draw_text", |target_id: &str, text: &str, x: f64, y: f64, font: &str, color: &str| -> Result<(), String> {
+            if let Some(dom) = DomContext::new() {
+                dom.canvas_draw_text(target_id, text, x, y, font, color)
             } else {
                 Err("DOM Context unavailable".to_string())
             }
