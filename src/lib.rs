@@ -1,3 +1,36 @@
+#![cfg_attr(not(test), warn(clippy::all, clippy::pedantic, clippy::cargo))]
+// ==========================================
+// ⛔ STRICT DENY (Keamanan & Anti-Mangkir)
+// ==========================================
+#![cfg_attr(not(test), deny(
+    clippy::correctness,
+    clippy::suspicious,
+    clippy::unwrap_used,   // Wajib handle error (jangan pakai panics)
+    clippy::expect_used,   // Sama seperti unwrap
+    clippy::todo,          // Cegah AI/Developer meninggalkan placeholder
+    clippy::unimplemented, // Cegah fungsi kosong masuk ke production
+))]
+// ==========================================
+// 🚧 TEMPORARY ALLOW (Tersisa Prioritas Merah & Struktural)
+// ==========================================
+#![allow(
+    clippy::suboptimal_flops,      // 🔴 Paling tinggi: tensor math (Belum dioptimasi)
+
+    // ⚠️ STRUKTURAL: Dipertahankan agar AI tidak merusak arsitektur hot-path SoA
+    clippy::too_many_lines,
+    clippy::too_many_arguments,
+)]
+// ==========================================
+// 🛡️ PERMANENT ALLOW (Domain Tensor)
+// ==========================================
+#![allow(
+    clippy::module_name_repetitions,
+    clippy::must_use_candidate,
+    clippy::unreadable_literal, // FHRR random generator constant
+    clippy::cast_possible_truncation,
+    clippy::cast_precision_loss,
+    clippy::cast_sign_loss,
+)]
 mod field;
 mod bridge;
 mod command;

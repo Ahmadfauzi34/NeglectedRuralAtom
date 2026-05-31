@@ -57,8 +57,11 @@ impl SvgGenerator {
         }
 
         let mut out = Vec::new();
-        svg::write(&mut out, &document).unwrap();
-        String::from_utf8(out).unwrap_or_default()
+        if svg::write(&mut out, &document).is_ok() {
+            String::from_utf8(out).unwrap_or_default()
+        } else {
+            String::new()
+        }
     }
 
     /// Wraps standard HTML within an SVG `<foreignObject>`.
@@ -85,28 +88,28 @@ impl SvgGenerator {
 
         {
             let root = SVGBackend::with_string(&mut svg_buffer, (400, 300)).into_drawing_area();
-            root.fill(&WHITE).unwrap();
+            let _ = root.fill(&WHITE);
 
             // Find min/max for scaling
             let max_x = data_points.iter().map(|p| p.0).fold(0.0f32, f32::max);
             let max_y = data_points.iter().map(|p| p.1).fold(0.0f32, f32::max);
 
-            let mut chart = ChartBuilder::on(&root)
+            if let Ok(mut chart) = ChartBuilder::on(&root)
                 .caption(title, ("sans-serif", 20).into_font())
                 .margin(5)
                 .x_label_area_size(30)
                 .y_label_area_size(30)
                 .build_cartesian_2d(0f32..max_x, 0f32..max_y)
-                .unwrap();
+            {
+                let _ = chart.configure_mesh().draw();
 
-            chart.configure_mesh().draw().unwrap();
+                let _ = chart.draw_series(LineSeries::new(
+                    data_points.iter().copied(),
+                    &RED,
+                ));
+            }
 
-            chart.draw_series(LineSeries::new(
-                data_points.iter().copied(),
-                &RED,
-            )).unwrap();
-
-            root.present().unwrap();
+            let _ = root.present();
         } // Drop the backend here so the string buffer unlocks
 
         svg_buffer

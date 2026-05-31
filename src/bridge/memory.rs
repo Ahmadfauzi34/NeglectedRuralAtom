@@ -87,7 +87,9 @@ impl KernelBridge {
     /// across idle Data Workers. Zero-copy parsing via JsValue.
     pub fn spawn_workers_batch(&mut self, base_task_id: u32, payloads_js: JsValue) -> i32 {
         if let Ok(payloads) = serde_wasm_bindgen::from_value::<Vec<String>>(payloads_js) {
-            let mut state = self.state.write().unwrap();
+            let Ok(mut state) = self.state.write() else {
+                return -1;
+            };
             let mut spawned_count = 0;
 
             for payload in payloads {
@@ -108,7 +110,9 @@ impl KernelBridge {
     pub fn eval_llm_script(&mut self, script: &str) -> String {
         let start_time = Telemetry::start_timer();
 
-        let mut state = self.state.write().unwrap();
+        let Ok(mut state) = self.state.write() else {
+            return "WASM Lock Error: Cannot access state".to_string();
+        };
         let SharedState { field, workers, messages, env_grid, vector_mem, config, .. } = &mut *state;
         let metrics_copy = self.telemetry.metrics.clone();
 
@@ -129,7 +133,9 @@ impl KernelBridge {
 
         let result = match serde_wasm_bindgen::from_value::<Vec<ScriptNode>>(nodes_js) {
             Ok(nodes) => {
-                let mut state = self.state.write().unwrap();
+                let Ok(mut state) = self.state.write() else {
+                    return "WASM Lock Error".to_string();
+                };
                 let SharedState { field, workers, messages, env_grid, vector_mem, config, .. } = &mut *state;
                 let metrics_copy = self.telemetry.metrics.clone();
 
@@ -160,7 +166,9 @@ impl KernelBridge {
     pub fn generate_llm_prompt(&mut self) -> String {
         // Scope the lock to copy only what we need (Snapshot)
         let snapshot = {
-            let state = self.state.read().unwrap();
+            let Ok(state) = self.state.read() else {
+                return String::new();
+            };
 
             // Limit snapshot size to avoid cloning huge arrays if not necessary
             let limit = state.field.len.min(50);
@@ -187,13 +195,17 @@ impl KernelBridge {
     }
 
     pub fn spawn(&mut self, x: f32, y: f32, health: f32) -> usize {
-        let mut state = self.state.write().unwrap();
-        state.field.spawn(x, y, health)
+        if let Ok(mut state) = self.state.write() {
+            state.field.spawn(x, y, health)
+        } else {
+            0
+        }
     }
     
     pub fn kill(&mut self, idx: usize) {
-        let mut state = self.state.write().unwrap();
-        state.field.kill_swap(idx);
+        if let Ok(mut state) = self.state.write() {
+            state.field.kill_swap(idx);
+        }
     }
     
     pub fn set_render_mode(&mut self, use_webgl: bool) {
@@ -201,22 +213,25 @@ impl KernelBridge {
     }
 
     pub fn set_config(&mut self, dt: f32, friction: f32, max_speed: f32, influence_radius: f32, cursor_x: f32, cursor_y: f32, cursor_weight: f32) {
-        let mut state = self.state.write().unwrap();
-        state.config = KernelConfig {
-            dt,
-            friction,
-            max_speed,
-            influence_radius,
-            cursor_x,
-            cursor_y,
-            cursor_weight,
-            ..state.config
-        };
+        if let Ok(mut state) = self.state.write() {
+            state.config = KernelConfig {
+                dt,
+                friction,
+                max_speed,
+                influence_radius,
+                cursor_x,
+                cursor_y,
+                cursor_weight,
+                ..state.config
+            };
+        }
     }
     
     pub fn step(&mut self) {
         let start_time = Telemetry::start_timer();
-        let mut state = self.state.write().unwrap();
+        let Ok(mut state) = self.state.write() else {
+            return;
+        };
 
         // Record structural counts into telemetry
         self.telemetry.metrics.active_physics_agents = state.field.agent_count();
@@ -275,8 +290,11 @@ impl KernelBridge {
     
     #[wasm_bindgen(getter)]
     pub fn agent_count(&self) -> usize {
-        let state = self.state.read().unwrap();
-        state.field.agent_count()
+        if let Ok(state) = self.state.read() {
+            state.field.agent_count()
+        } else {
+            0
+        }
     }
     
     #[wasm_bindgen(getter)]
@@ -285,14 +303,20 @@ impl KernelBridge {
         // if JS accesses them while a Write lock is held or if a reallocation occurs.
         // As long as SOA buffer is pre-allocated and JS only reads during idle time, it's safe.
         // WebAssembly linear memory does not move unless the Vec reallocates.
-        let state = self.state.read().unwrap();
-        state.field.pos_x_ptr()
+        if let Ok(state) = self.state.read() {
+            state.field.pos_x_ptr()
+        } else {
+            std::ptr::null()
+        }
     }
     
     #[wasm_bindgen(getter)]
     pub fn pos_y_ptr(&self) -> *const f32 {
-        let state = self.state.read().unwrap();
-        state.field.pos_y_ptr()
+        if let Ok(state) = self.state.read() {
+            state.field.pos_y_ptr()
+        } else {
+            std::ptr::null()
+        }
     }
 
     /// Exposes a serialized JSON of the engine metrics to Javascript
@@ -306,25 +330,33 @@ pub struct MemoryView;
 
 #[wasm_bindgen]
 impl MemoryView {
-    pub fn float32_array(ptr: *const f32, len: usize) -> js_sys::Float32Array {
-        unsafe { js_sys::Float32Array::view(std::slice::from_raw_parts(ptr, len)) }
+    /// Creates a Float32Array over WASM linear memory.
+    /// # Safety
+    /// The caller must ensure `ptr` is valid for `len` elements and the memory is not accessed mutably or reallocated while the view is active.
+    pub unsafe fn float32_array(ptr: *const f32, len: usize) -> js_sys::Float32Array {
+        js_sys::Float32Array::view(std::slice::from_raw_parts(ptr, len))
     }
     
-    pub fn uint8_array(ptr: *const u8, len: usize) -> js_sys::Uint8Array {
-        unsafe { js_sys::Uint8Array::view(std::slice::from_raw_parts(ptr, len)) }
+    /// Creates a Uint8Array over WASM linear memory.
+    /// # Safety
+    /// The caller must ensure `ptr` is valid for `len` elements and the memory is not accessed mutably or reallocated while the view is active.
+    pub unsafe fn uint8_array(ptr: *const u8, len: usize) -> js_sys::Uint8Array {
+        js_sys::Uint8Array::view(std::slice::from_raw_parts(ptr, len))
     }
     
-    pub fn read_u32(ptr: *const u8) -> u32 {
-        unsafe {
-            let slice = std::slice::from_raw_parts(ptr, 4);
-            u32::from_le_bytes([slice[0], slice[1], slice[2], slice[3]])
-        }
+    /// Reads a u32 from WASM linear memory safely.
+    /// # Safety
+    /// The caller must ensure `ptr` points to at least 4 contiguous bytes.
+    pub unsafe fn read_u32(ptr: *const u8) -> u32 {
+        let slice = std::slice::from_raw_parts(ptr, 4);
+        u32::from_le_bytes([slice[0], slice[1], slice[2], slice[3]])
     }
     
-    pub fn read_f32(ptr: *const u8) -> f32 {
-        unsafe {
-            let slice = std::slice::from_raw_parts(ptr, 4);
-            f32::from_le_bytes([slice[0], slice[1], slice[2], slice[3]])
-        }
+    /// Reads an f32 from WASM linear memory safely.
+    /// # Safety
+    /// The caller must ensure `ptr` points to at least 4 contiguous bytes.
+    pub unsafe fn read_f32(ptr: *const u8) -> f32 {
+        let slice = std::slice::from_raw_parts(ptr, 4);
+        f32::from_le_bytes([slice[0], slice[1], slice[2], slice[3]])
     }
 }
