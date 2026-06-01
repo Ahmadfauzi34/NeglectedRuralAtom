@@ -1,5 +1,5 @@
-use serde::Serialize;
 use rhai::CustomType;
+use serde::Serialize;
 #[cfg(target_arch = "wasm32")]
 use web_sys::window;
 

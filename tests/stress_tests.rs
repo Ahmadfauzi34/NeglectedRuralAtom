@@ -1,32 +1,32 @@
 // Include internal modules for testing
 #[path = "../src/field/mod.rs"]
 mod field;
-use field::soa::AgentField;
-use field::kernel::{KernelConfig, step_agents};
-use field::spatial_grid::SpatialGrid;
-use field::environment_grid::EnvironmentGrid;
 use field::data_worker::DataWorkerField;
+use field::environment_grid::EnvironmentGrid;
+use field::kernel::{step_agents, KernelConfig};
+use field::soa::AgentField;
+use field::spatial_grid::SpatialGrid;
 
 #[path = "../src/bridge/mod.rs"]
 mod bridge;
+#[path = "../src/business.rs"]
+mod business;
 #[path = "../src/command/mod.rs"]
 mod command;
+#[path = "../src/dom.rs"]
+mod dom;
+#[path = "../src/graph.rs"]
+mod graph;
+#[path = "../src/prompt.rs"]
+mod prompt;
 #[path = "../src/render/mod.rs"]
 mod render;
 #[path = "../src/scripting.rs"]
 mod scripting;
-#[path = "../src/dom.rs"]
-mod dom;
-#[path = "../src/prompt.rs"]
-mod prompt;
-#[path = "../src/business.rs"]
-mod business;
-#[path = "../src/telemetry.rs"]
-mod telemetry;
-#[path = "../src/graph.rs"]
-mod graph;
 #[path = "../src/svg_generator.rs"]
 mod svg_generator;
+#[path = "../src/telemetry.rs"]
+mod telemetry;
 
 use bridge::KernelBridge;
 
@@ -39,11 +39,7 @@ fn test_physics_hot_loop() {
 
     // Spawn 10,000 agents
     for _ in 0..10_000 {
-        field.spawn(
-            fastrand::f32() * 800.0,
-            fastrand::f32() * 600.0,
-            100.0
-        );
+        field.spawn(fastrand::f32() * 800.0, fastrand::f32() * 600.0, 100.0);
     }
 
     assert_eq!(field.agent_count(), 10_000);

@@ -16,7 +16,11 @@ impl PromptBuilder {
 
     /// Iterates over a fast snapshot of agents to avoid holding read locks.
     /// This is highly optimized using `Write` trait to avoid `format!` allocations.
-    pub fn build_from_snapshot(&mut self, snapshot: &[(usize, f32, f32, f32, f32, f32)], total_agents: usize) -> &str {
+    pub fn build_from_snapshot(
+        &mut self,
+        snapshot: &[(usize, f32, f32, f32, f32, f32)],
+        total_agents: usize,
+    ) -> &str {
         self.buffer.clear();
 
         let _ = writeln!(&mut self.buffer, "Current Agent States:");
@@ -30,7 +34,11 @@ impl PromptBuilder {
         }
 
         if total_agents > snapshot.len() {
-            let _ = writeln!(&mut self.buffer, "... and {} more agents.", total_agents - snapshot.len());
+            let _ = writeln!(
+                &mut self.buffer,
+                "... and {} more agents.",
+                total_agents - snapshot.len()
+            );
         }
 
         &self.buffer

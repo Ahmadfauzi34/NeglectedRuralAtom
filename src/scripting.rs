@@ -1,11 +1,14 @@
-use rhai::{Engine, Scope, Dynamic, CustomType, Array};
-use crate::field::{AgentField, DataWorkerField, MessageBus, EnvironmentGrid, vector_memory::VectorMemory, BROADCAST_ID};
-use crate::field::tensor_logic::{Tensor3D, SpectralCore, ZeroParamBridge, OrthogonalFusion};
-use crate::dom::DomContext;
 use crate::business;
-use crate::telemetry::EngineMetrics;
-use crate::svg_generator::SvgGenerator;
+use crate::dom::DomContext;
+use crate::field::tensor_logic::{OrthogonalFusion, SpectralCore, Tensor3D, ZeroParamBridge};
+use crate::field::{
+    vector_memory::VectorMemory, AgentField, DataWorkerField, EnvironmentGrid, MessageBus,
+    BROADCAST_ID,
+};
 use crate::render::CanvasEncoder;
+use crate::svg_generator::SvgGenerator;
+use crate::telemetry::EngineMetrics;
+use rhai::{Array, CustomType, Dynamic, Engine, Scope};
 
 /// Safe sandboxed environment to evaluate dynamic scripts (e.g. from LLM).
 pub struct ScriptEngine {
@@ -79,7 +82,9 @@ impl FieldContext {
         let field = self.get_field();
         if idx >= 0 {
             let u_idx = idx as usize;
-            if let (Some(x_ref), Some(y_ref)) = (field.pos_x.get_mut(u_idx), field.pos_y.get_mut(u_idx)) {
+            if let (Some(x_ref), Some(y_ref)) =
+                (field.pos_x.get_mut(u_idx), field.pos_y.get_mut(u_idx))
+            {
                 *x_ref = x as f32;
                 *y_ref = y as f32;
             }
@@ -100,7 +105,9 @@ impl FieldContext {
         let field = self.get_field();
         if idx >= 0 {
             let u_idx = idx as usize;
-            if let (Some(vx_ref), Some(vy_ref)) = (field.vel_x.get_mut(u_idx), field.vel_y.get_mut(u_idx)) {
+            if let (Some(vx_ref), Some(vy_ref)) =
+                (field.vel_x.get_mut(u_idx), field.vel_y.get_mut(u_idx))
+            {
                 *vx_ref = vx as f32;
                 *vy_ref = vy as f32;
             }
@@ -237,8 +244,13 @@ impl MessageContext {
 
     pub fn send(&mut self, sender_id: i64, receiver_id: i64, msg_type: i64, payload: &str) {
         if sender_id >= 0 && receiver_id >= -1 {
-            let r_id = if receiver_id == -1 { BROADCAST_ID } else { receiver_id as u32 };
-            self.get_bus().send_message(sender_id as u32, r_id, msg_type as u8, payload);
+            let r_id = if receiver_id == -1 {
+                BROADCAST_ID
+            } else {
+                receiver_id as u32
+            };
+            self.get_bus()
+                .send_message(sender_id as u32, r_id, msg_type as u8, payload);
         }
     }
 
@@ -383,13 +395,32 @@ impl ScriptEngine {
         engine.register_fn("get_count", |ctx: &mut FieldContext| ctx.get_count());
         engine.register_fn("get_x", |ctx: &mut FieldContext, idx: i64| ctx.get_x(idx));
         engine.register_fn("get_y", |ctx: &mut FieldContext, idx: i64| ctx.get_y(idx));
-        engine.register_fn("get_behavior", |ctx: &mut FieldContext, idx: i64| ctx.get_behavior(idx));
-        engine.register_fn("set_behavior", |ctx: &mut FieldContext, idx: i64, state: i64| ctx.set_behavior(idx, state));
-        engine.register_fn("set_velocity", |ctx: &mut FieldContext, idx: i64, vx: f64, vy: f64| ctx.set_velocity(idx, vx, vy));
-        engine.register_fn("set_pos", |ctx: &mut FieldContext, idx: i64, x: f64, y: f64| ctx.set_pos(idx, x, y));
-        engine.register_fn("set_health", |ctx: &mut FieldContext, idx: i64, health: f64| ctx.set_health(idx, health));
-        engine.register_fn("agent_spawn", |ctx: &mut FieldContext, x: f64, y: f64, health: f64| ctx.spawn(x, y, health));
-        engine.register_fn("agent_kill", |ctx: &mut FieldContext, idx: i64| ctx.kill(idx));
+        engine.register_fn("get_behavior", |ctx: &mut FieldContext, idx: i64| {
+            ctx.get_behavior(idx)
+        });
+        engine.register_fn(
+            "set_behavior",
+            |ctx: &mut FieldContext, idx: i64, state: i64| ctx.set_behavior(idx, state),
+        );
+        engine.register_fn(
+            "set_velocity",
+            |ctx: &mut FieldContext, idx: i64, vx: f64, vy: f64| ctx.set_velocity(idx, vx, vy),
+        );
+        engine.register_fn(
+            "set_pos",
+            |ctx: &mut FieldContext, idx: i64, x: f64, y: f64| ctx.set_pos(idx, x, y),
+        );
+        engine.register_fn(
+            "set_health",
+            |ctx: &mut FieldContext, idx: i64, health: f64| ctx.set_health(idx, health),
+        );
+        engine.register_fn(
+            "agent_spawn",
+            |ctx: &mut FieldContext, x: f64, y: f64, health: f64| ctx.spawn(x, y, health),
+        );
+        engine.register_fn("agent_kill", |ctx: &mut FieldContext, idx: i64| {
+            ctx.kill(idx)
+        });
 
         // --- WORKER AGENT APIS FOR RHAI ---
         engine.build_type::<WorkerContext>();
@@ -423,93 +454,138 @@ impl ScriptEngine {
 
         // --- DOM MANIPULATION APIS FOR RHAI ---
 
-        engine.register_fn("dom_get_html", |target_id: &str| -> Result<String, String> {
-            if let Some(dom) = DomContext::new() {
-                dom.get_html(target_id)
-            } else {
-                Err("DOM Context unavailable".to_string())
-            }
-        });
+        engine.register_fn(
+            "dom_get_html",
+            |target_id: &str| -> Result<String, String> {
+                if let Some(dom) = DomContext::new() {
+                    dom.get_html(target_id)
+                } else {
+                    Err("DOM Context unavailable".to_string())
+                }
+            },
+        );
 
-        engine.register_fn("dom_insert_html", |target_id: &str, position: &str, html: &str| -> Result<(), String> {
-            if let Some(dom) = DomContext::new() {
-                dom.insert_html_at(target_id, position, html)
-            } else {
-                Err("DOM Context unavailable".to_string())
-            }
-        });
+        engine.register_fn(
+            "dom_insert_html",
+            |target_id: &str, position: &str, html: &str| -> Result<(), String> {
+                if let Some(dom) = DomContext::new() {
+                    dom.insert_html_at(target_id, position, html)
+                } else {
+                    Err("DOM Context unavailable".to_string())
+                }
+            },
+        );
 
-        engine.register_fn("dom_diff_replace_html", |target_id: &str, old_str: &str, new_str: &str| -> Result<bool, String> {
-            if let Some(dom) = DomContext::new() {
-                dom.diff_and_replace_html(target_id, old_str, new_str)
-            } else {
-                Err("DOM Context unavailable".to_string())
-            }
-        });
+        engine.register_fn(
+            "dom_diff_replace_html",
+            |target_id: &str, old_str: &str, new_str: &str| -> Result<bool, String> {
+                if let Some(dom) = DomContext::new() {
+                    dom.diff_and_replace_html(target_id, old_str, new_str)
+                } else {
+                    Err("DOM Context unavailable".to_string())
+                }
+            },
+        );
 
-        engine.register_fn("dom_append_html", |target_id: &str, html: &str| -> Result<(), String> {
-            if let Some(dom) = DomContext::new() {
-                dom.append_html(target_id, html)
-            } else {
-                Err("DOM Context unavailable".to_string())
-            }
-        });
+        engine.register_fn(
+            "dom_append_html",
+            |target_id: &str, html: &str| -> Result<(), String> {
+                if let Some(dom) = DomContext::new() {
+                    dom.append_html(target_id, html)
+                } else {
+                    Err("DOM Context unavailable".to_string())
+                }
+            },
+        );
 
-        engine.register_fn("dom_set_inner_html", |target_id: &str, html: &str| -> Result<(), String> {
-            if let Some(dom) = DomContext::new() {
-                dom.set_inner_html(target_id, html)
-            } else {
-                Err("DOM Context unavailable".to_string())
-            }
-        });
+        engine.register_fn(
+            "dom_set_inner_html",
+            |target_id: &str, html: &str| -> Result<(), String> {
+                if let Some(dom) = DomContext::new() {
+                    dom.set_inner_html(target_id, html)
+                } else {
+                    Err("DOM Context unavailable".to_string())
+                }
+            },
+        );
 
-        engine.register_fn("dom_set_text", |target_id: &str, text: &str| -> Result<(), String> {
-            if let Some(dom) = DomContext::new() {
-                dom.set_text_content(target_id, text)
-            } else {
-                Err("DOM Context unavailable".to_string())
-            }
-        });
+        engine.register_fn(
+            "dom_set_text",
+            |target_id: &str, text: &str| -> Result<(), String> {
+                if let Some(dom) = DomContext::new() {
+                    dom.set_text_content(target_id, text)
+                } else {
+                    Err("DOM Context unavailable".to_string())
+                }
+            },
+        );
 
-        engine.register_fn("dom_set_style", |target_id: &str, property: &str, value: &str| -> Result<(), String> {
-            if let Some(dom) = DomContext::new() {
-                dom.set_style(target_id, property, value)
-            } else {
-                Err("DOM Context unavailable".to_string())
-            }
-        });
+        engine.register_fn(
+            "dom_set_style",
+            |target_id: &str, property: &str, value: &str| -> Result<(), String> {
+                if let Some(dom) = DomContext::new() {
+                    dom.set_style(target_id, property, value)
+                } else {
+                    Err("DOM Context unavailable".to_string())
+                }
+            },
+        );
 
-        engine.register_fn("dom_get_value", |target_id: &str| -> Result<String, String> {
-            if let Some(dom) = DomContext::new() {
-                dom.get_value(target_id)
-            } else {
-                Err("DOM Context unavailable".to_string())
-            }
-        });
+        engine.register_fn(
+            "dom_get_value",
+            |target_id: &str| -> Result<String, String> {
+                if let Some(dom) = DomContext::new() {
+                    dom.get_value(target_id)
+                } else {
+                    Err("DOM Context unavailable".to_string())
+                }
+            },
+        );
 
-        engine.register_fn("dom_canvas_fill_rect", |target_id: &str, x: f64, y: f64, w: f64, h: f64, fill_style: &str| -> Result<(), String> {
-            if let Some(dom) = DomContext::new() {
-                dom.canvas_fill_rect(target_id, x, y, w, h, fill_style)
-            } else {
-                Err("DOM Context unavailable".to_string())
-            }
-        });
+        engine.register_fn(
+            "dom_canvas_fill_rect",
+            |target_id: &str,
+             x: f64,
+             y: f64,
+             w: f64,
+             h: f64,
+             fill_style: &str|
+             -> Result<(), String> {
+                if let Some(dom) = DomContext::new() {
+                    dom.canvas_fill_rect(target_id, x, y, w, h, fill_style)
+                } else {
+                    Err("DOM Context unavailable".to_string())
+                }
+            },
+        );
 
-        engine.register_fn("dom_canvas_clear_rect", |target_id: &str, x: f64, y: f64, w: f64, h: f64| -> Result<(), String> {
-            if let Some(dom) = DomContext::new() {
-                dom.canvas_clear_rect(target_id, x, y, w, h)
-            } else {
-                Err("DOM Context unavailable".to_string())
-            }
-        });
+        engine.register_fn(
+            "dom_canvas_clear_rect",
+            |target_id: &str, x: f64, y: f64, w: f64, h: f64| -> Result<(), String> {
+                if let Some(dom) = DomContext::new() {
+                    dom.canvas_clear_rect(target_id, x, y, w, h)
+                } else {
+                    Err("DOM Context unavailable".to_string())
+                }
+            },
+        );
 
-        engine.register_fn("dom_canvas_draw_text", |target_id: &str, text: &str, x: f64, y: f64, font: &str, color: &str| -> Result<(), String> {
-            if let Some(dom) = DomContext::new() {
-                dom.canvas_draw_text(target_id, text, x, y, font, color)
-            } else {
-                Err("DOM Context unavailable".to_string())
-            }
-        });
+        engine.register_fn(
+            "dom_canvas_draw_text",
+            |target_id: &str,
+             text: &str,
+             x: f64,
+             y: f64,
+             font: &str,
+             color: &str|
+             -> Result<(), String> {
+                if let Some(dom) = DomContext::new() {
+                    dom.canvas_draw_text(target_id, text, x, y, font, color)
+                } else {
+                    Err("DOM Context unavailable".to_string())
+                }
+            },
+        );
 
         // --- BUSINESS ANALYTICS APIS FOR RHAI ---
         engine.register_fn("json_extract_string", business::json_extract_string);
@@ -524,10 +600,18 @@ impl ScriptEngine {
 
         // --- TELEMETRY APIS FOR RHAI ---
         engine.build_type::<EngineMetrics>();
-        engine.register_fn("get_physics_ms", |m: &mut EngineMetrics| -> f64 { m.physics_step_ms });
-        engine.register_fn("get_script_ms", |m: &mut EngineMetrics| -> f64 { m.scripting_eval_ms });
-        engine.register_fn("get_active_workers", |m: &mut EngineMetrics| -> i64 { m.active_data_workers as i64 });
-        engine.register_fn("get_arena_bytes", |m: &mut EngineMetrics| -> i64 { m.text_arena_bytes as i64 });
+        engine.register_fn("get_physics_ms", |m: &mut EngineMetrics| -> f64 {
+            m.physics_step_ms
+        });
+        engine.register_fn("get_script_ms", |m: &mut EngineMetrics| -> f64 {
+            m.scripting_eval_ms
+        });
+        engine.register_fn("get_active_workers", |m: &mut EngineMetrics| -> i64 {
+            m.active_data_workers as i64
+        });
+        engine.register_fn("get_arena_bytes", |m: &mut EngineMetrics| -> i64 {
+            m.text_arena_bytes as i64
+        });
 
         // --- TENSOR LOGIC / ASYMMETRIC SPARSE CORE APIS FOR RHAI ---
         engine.build_type::<Tensor3D>();
@@ -548,9 +632,20 @@ impl ScriptEngine {
         // --- RENDER CONTEXT APIS FOR RHAI ---
         engine.build_type::<RenderContext>();
         engine.register_fn("canvas_clear", |cx: &mut RenderContext| cx.clear());
-        engine.register_fn("canvas_circle", |cx: &mut RenderContext, x: f64, y: f64, r: f64, c: i64| cx.circle(x, y, r, c));
-        engine.register_fn("canvas_line", |cx: &mut RenderContext, x1: f64, y1: f64, x2: f64, y2: f64, c: i64| cx.line(x1, y1, x2, y2, c));
-        engine.register_fn("canvas_rect", |cx: &mut RenderContext, x: f64, y: f64, w: f64, h: f64, c: i64| cx.rect(x, y, w, h, c));
+        engine.register_fn(
+            "canvas_circle",
+            |cx: &mut RenderContext, x: f64, y: f64, r: f64, c: i64| cx.circle(x, y, r, c),
+        );
+        engine.register_fn(
+            "canvas_line",
+            |cx: &mut RenderContext, x1: f64, y1: f64, x2: f64, y2: f64, c: i64| {
+                cx.line(x1, y1, x2, y2, c)
+            },
+        );
+        engine.register_fn(
+            "canvas_rect",
+            |cx: &mut RenderContext, x: f64, y: f64, w: f64, h: f64, c: i64| cx.rect(x, y, w, h, c),
+        );
 
         // --- KERNEL CONFIG APIS FOR RHAI ---
         engine.build_type::<ConfigContext>();
@@ -558,42 +653,56 @@ impl ScriptEngine {
         engine.register_fn("get_cursor_y", ConfigContext::get_cursor_y);
         engine.register_fn("get_cursor_weight", ConfigContext::get_cursor_weight);
 
+        // Graph Context (for AST caching parallel execution)
+        engine.build_type::<crate::graph::GraphContext>();
+        engine.register_fn("get_var", crate::graph::GraphContext::get_var);
+        engine.register_fn("set_var", crate::graph::GraphContext::set_var);
+
         // --- SVG AND PLOTTING APIS FOR RHAI ---
         // Allows LLM to dynamically generate generic statistical charts
-        engine.register_fn("svg_draw_scatter", |cx: f32, cy: f32, positions: Array| -> String {
-            let mut rust_positions = Vec::new();
-            for item in positions {
-                // Expects an array of [x, y] coordinates
-                if let Ok(arr) = item.into_array() {
-                    if arr.len() >= 2 {
-                        let x = arr[0].as_float().unwrap_or(0.0) as f32;
-                        let y = arr[1].as_float().unwrap_or(0.0) as f32;
-                        rust_positions.push((x, y));
+        engine.register_fn(
+            "svg_draw_scatter",
+            |cx: f32, cy: f32, positions: Array| -> String {
+                let mut rust_positions = Vec::new();
+                for item in positions {
+                    // Expects an array of [x, y] coordinates
+                    if let Ok(arr) = item.into_array() {
+                        if arr.len() >= 2 {
+                            let x = arr[0].as_float().unwrap_or(0.0) as f32;
+                            let y = arr[1].as_float().unwrap_or(0.0) as f32;
+                            rust_positions.push((x, y));
+                        }
                     }
                 }
-            }
-            SvgGenerator::build_scatter_svg(cx, cy, &rust_positions)
-        });
+                SvgGenerator::build_scatter_svg(cx, cy, &rust_positions)
+            },
+        );
 
-        engine.register_fn("svg_draw_line_chart", |title: &str, data: Array| -> String {
-            let mut rust_points = Vec::new();
-            for item in data {
-                if let Ok(arr) = item.into_array() {
-                    if arr.len() >= 2 {
-                        let x = arr[0].as_float().unwrap_or(0.0) as f32;
-                        let y = arr[1].as_float().unwrap_or(0.0) as f32;
-                        rust_points.push((x, y));
+        engine.register_fn(
+            "svg_draw_line_chart",
+            |title: &str, data: Array| -> String {
+                let mut rust_points = Vec::new();
+                for item in data {
+                    if let Ok(arr) = item.into_array() {
+                        if arr.len() >= 2 {
+                            let x = arr[0].as_float().unwrap_or(0.0) as f32;
+                            let y = arr[1].as_float().unwrap_or(0.0) as f32;
+                            rust_points.push((x, y));
+                        }
                     }
                 }
-            }
-            SvgGenerator::build_line_chart_svg(&rust_points, title)
-        });
+                SvgGenerator::build_line_chart_svg(&rust_points, title)
+            },
+        );
 
         engine.register_fn("svg_foreign_object", SvgGenerator::build_foreign_object_svg);
 
         // We can still keep utility functions
         engine.register_fn("render_html_card", |title: &str, content: &str| -> String {
-            format!("<div class='agent-card'><h3>{}</h3><p>{}</p></div>", title, content)
+            format!(
+                "<div class='agent-card'><h3>{}</h3><p>{}</p></div>",
+                title, content
+            )
         });
 
         // Security limits:
@@ -616,7 +725,7 @@ impl ScriptEngine {
         vector_mem: &mut VectorMemory,
         encoder: &mut CanvasEncoder,
         config: &crate::field::KernelConfig,
-        metrics: EngineMetrics
+        metrics: EngineMetrics,
     ) -> Result<String, String> {
         let f_ctx = FieldContext::new(field);
         let w_ctx = WorkerContext::new(workers);
@@ -650,9 +759,23 @@ impl ScriptEngine {
 
     /// Evaluates a Rhai script string and returns the resulting String.
     /// Passes the contexts as dynamic variables to the script.
-    pub fn eval(&mut self, script: &str, field: &mut AgentField, workers: &mut DataWorkerField, messages: &mut MessageBus, env_grid: &mut EnvironmentGrid, vector_mem: &mut VectorMemory, encoder: &mut CanvasEncoder, config: &crate::field::KernelConfig, metrics: EngineMetrics) -> Result<String, String> {
+    pub fn eval(
+        &mut self,
+        script: &str,
+        field: &mut AgentField,
+        workers: &mut DataWorkerField,
+        messages: &mut MessageBus,
+        env_grid: &mut EnvironmentGrid,
+        vector_mem: &mut VectorMemory,
+        encoder: &mut CanvasEncoder,
+        config: &crate::field::KernelConfig,
+        metrics: EngineMetrics,
+    ) -> Result<String, String> {
         let mut scope = Scope::new();
-        self.eval_with_injected_scope(&mut scope, script, field, workers, messages, env_grid, vector_mem, encoder, config, metrics)
+        self.eval_with_injected_scope(
+            &mut scope, script, field, workers, messages, env_grid, vector_mem, encoder, config,
+            metrics,
+        )
     }
 }
 
@@ -679,15 +802,18 @@ impl RenderContext {
     }
 
     pub fn circle(&mut self, x: f64, y: f64, r: f64, color: i64) {
-        self.get_encoder().circle(x as f32, y as f32, r as f32, color as u32);
+        self.get_encoder()
+            .circle(x as f32, y as f32, r as f32, color as u32);
     }
 
     pub fn line(&mut self, x1: f64, y1: f64, x2: f64, y2: f64, color: i64) {
-        self.get_encoder().line(x1 as f32, y1 as f32, x2 as f32, y2 as f32, color as u32);
+        self.get_encoder()
+            .line(x1 as f32, y1 as f32, x2 as f32, y2 as f32, color as u32);
     }
 
     pub fn rect(&mut self, x: f64, y: f64, w: f64, h: f64, color: i64) {
-        self.get_encoder().rect(x as f32, y as f32, w as f32, h as f32, color as u32);
+        self.get_encoder()
+            .rect(x as f32, y as f32, w as f32, h as f32, color as u32);
     }
 }
 

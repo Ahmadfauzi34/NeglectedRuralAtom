@@ -44,7 +44,10 @@ impl SpatialGrid {
 
     pub fn insert(&mut self, x: f32, y: f32, id: usize) {
         let key = self.get_cell_key(x, y);
-        self.cells.entry(key).or_insert_with(|| Vec::with_capacity(16)).push(id);
+        self.cells
+            .entry(key)
+            .or_insert_with(|| Vec::with_capacity(16))
+            .push(id);
     }
 
     /// Queries the grid for neighbors around a coordinate within a radius.

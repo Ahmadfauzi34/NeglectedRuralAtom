@@ -1,5 +1,5 @@
-use agentic_kernel::graph::{ScriptNode, GraphExecutor, GraphContext};
-use rhai::{Engine, Scope, Dynamic};
+use agentic_kernel::graph::{GraphContext, GraphExecutor, ScriptNode};
+use rhai::{Engine, Scope};
 
 #[test]
 fn test_parallel_graph_execution() {
@@ -34,19 +34,37 @@ fn test_parallel_graph_execution() {
             name: "Branch B".into(),
             script: "graph_ctx.set_var(\"branch_b_done\", previous_result);".into(),
             next: vec![],
-        }
+        },
     ];
 
     let result = executor.run_graph(&engine, &mut scope, nodes, "node1");
     assert!(result.is_ok(), "Graph execution failed: {:?}", result.err());
 
     // Verify that both branches updated the shared graph context memory
-    let started = executor.context.get_var("started").as_bool().unwrap_or(false);
+    let started = executor
+        .context
+        .get_var("started")
+        .as_bool()
+        .unwrap_or(false);
     assert!(started, "Node 1 did not execute");
 
-    let branch_a_res = executor.context.get_var("branch_a_done").into_string().unwrap_or("".into());
-    assert_eq!(branch_a_res, "success", "Branch A did not receive previous result from Node 1");
+    let branch_a_res = executor
+        .context
+        .get_var("branch_a_done")
+        .into_string()
+        .unwrap_or("".into());
+    assert_eq!(
+        branch_a_res, "success",
+        "Branch A did not receive previous result from Node 1"
+    );
 
-    let branch_b_res = executor.context.get_var("branch_b_done").into_string().unwrap_or("".into());
-    assert_eq!(branch_b_res, "success", "Branch B did not receive previous result from Node 1");
+    let branch_b_res = executor
+        .context
+        .get_var("branch_b_done")
+        .into_string()
+        .unwrap_or("".into());
+    assert_eq!(
+        branch_b_res, "success",
+        "Branch B did not receive previous result from Node 1"
+    );
 }

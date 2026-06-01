@@ -1,5 +1,5 @@
+use rhai::{CustomType, Dynamic, Engine, Scope, AST};
 use serde::{Deserialize, Serialize};
-use rhai::{Engine, Scope, Dynamic, CustomType, AST};
 use std::collections::HashMap;
 
 /// Represents a single execution step (node) in the LLM's dynamic logic graph.
@@ -72,17 +72,25 @@ impl GraphExecutor {
     }
 
     /// Pre-compiles the textual scripts inside the `ScriptNode` list into a cached AST map.
-    fn compile_nodes(engine: &Engine, nodes: Vec<ScriptNode>) -> Result<HashMap<String, CompiledNode>, String> {
+    fn compile_nodes(
+        engine: &Engine,
+        nodes: Vec<ScriptNode>,
+    ) -> Result<HashMap<String, CompiledNode>, String> {
         let mut compiled_map = HashMap::with_capacity(nodes.len());
 
         for node in nodes {
-            let ast = engine.compile(&node.script).map_err(|e| format!("Failed to compile node '{}': {}", node.id, e))?;
-            compiled_map.insert(node.id.clone(), CompiledNode {
-                id: node.id,
-                name: node.name,
-                ast,
-                next: node.next,
-            });
+            let ast = engine
+                .compile(&node.script)
+                .map_err(|e| format!("Failed to compile node '{}': {}", node.id, e))?;
+            compiled_map.insert(
+                node.id.clone(),
+                CompiledNode {
+                    id: node.id,
+                    name: node.name,
+                    ast,
+                    next: node.next,
+                },
+            );
         }
 
         Ok(compiled_map)
@@ -111,7 +119,9 @@ impl GraphExecutor {
         }
 
         // 3. Fetch from cache
-        let node_map = self.cached_graphs.get(&graph_hash).unwrap();
+        let Some(node_map) = self.cached_graphs.get(&graph_hash) else {
+            return Err("Failed to retrieve cached graph".to_string());
+        };
 
         let mut queue = std::collections::VecDeque::new();
         queue.push_back((start_node_id.to_string(), Dynamic::UNIT));
@@ -157,7 +167,10 @@ impl GraphExecutor {
                         }
                     }
                     Err(e) => {
-                        return Err(format!("ERROR in node '{}' ({}): {}", node.id, node.name, e));
+                        return Err(format!(
+                            "ERROR in node '{}' ({}): {}",
+                            node.id, node.name, e
+                        ));
                     }
                 }
             }
