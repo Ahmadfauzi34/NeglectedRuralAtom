@@ -31,17 +31,17 @@
     clippy::cast_precision_loss,
     clippy::cast_sign_loss,
 )]
-mod field;
 mod bridge;
+pub mod business;
 mod command;
+pub mod dom;
+mod field;
+pub mod graph;
+pub mod prompt;
 mod render;
 pub mod scripting;
-pub mod dom;
-pub mod prompt;
-pub mod business;
-pub mod telemetry;
-pub mod graph;
 pub mod svg_generator;
+pub mod telemetry;
 
 use wasm_bindgen::prelude::*;
 
@@ -54,7 +54,10 @@ pub fn start() {
     console_error_panic_hook::set_once();
 }
 
-pub use field::{AgentField, KernelConfig, step_agents};
-pub use bridge::{KernelBridge, MemoryView};
+pub use bridge::KernelBridge;
 pub use command::CommandBus;
-pub use render::{CanvasEncoder, DrawHeader, DrawCmd, TAG_CIRCLE, TAG_LINE, TAG_POLY, TAG_RECT, TAG_TEXT};
+pub use field::{step_agents, AgentField, KernelConfig};
+pub use render::{
+    CanvasEncoder, DrawCmd, DrawHeader, TAG_CIRCLE, TAG_LINE, TAG_POLY, TAG_RECT, TAG_TEXT,
+};
+pub mod vfs;

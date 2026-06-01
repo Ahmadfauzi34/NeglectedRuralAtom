@@ -1,6 +1,6 @@
-use svg::Document;
-use svg::node::element::{Circle, Rectangle};
 use plotters::prelude::*;
+use svg::node::element::{Circle, Rectangle};
+use svg::Document;
 
 /// A utility module exposing quick generic SVG and charting generators to the LLM Sandbox.
 pub struct SvgGenerator;
@@ -19,7 +19,7 @@ impl SvgGenerator {
                     .set("y", 0)
                     .set("width", 200)
                     .set("height", 200)
-                    .set("fill", "#111")
+                    .set("fill", "#111"),
             )
             .add(
                 Circle::new()
@@ -28,7 +28,7 @@ impl SvgGenerator {
                     .set("r", 90)
                     .set("stroke", "#4CAF50")
                     .set("stroke-width", 2)
-                    .set("fill", "none")
+                    .set("fill", "none"),
             );
 
         // Draw the center anchor (origin)
@@ -37,7 +37,7 @@ impl SvgGenerator {
                 .set("cx", 100)
                 .set("cy", 100)
                 .set("r", 3)
-                .set("fill", "#FFF")
+                .set("fill", "#FFF"),
         );
 
         for &(x, y) in points {
@@ -51,7 +51,7 @@ impl SvgGenerator {
                         .set("cx", rel_x)
                         .set("cy", rel_y)
                         .set("r", 2)
-                        .set("fill", "#3b82f6") // Generic blue point
+                        .set("fill", "#3b82f6"), // Generic blue point
                 );
             }
         }
@@ -103,10 +103,7 @@ impl SvgGenerator {
             {
                 let _ = chart.configure_mesh().draw();
 
-                let _ = chart.draw_series(LineSeries::new(
-                    data_points.iter().copied(),
-                    &RED,
-                ));
+                let _ = chart.draw_series(LineSeries::new(data_points.iter().copied(), &RED));
             }
 
             let _ = root.present();

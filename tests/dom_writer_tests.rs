@@ -1,4 +1,3 @@
-
 #[test]
 fn test_dom_writer_compiles() {
     // `web_sys` panic! on `cargo test` because it tries to evaluate `window()` from Rust natively.

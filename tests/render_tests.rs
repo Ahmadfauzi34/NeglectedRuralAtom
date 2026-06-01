@@ -27,5 +27,8 @@ fn test_generalized_rendering_via_rhai() {
 
     // The render length shouldn't be 0 since we drew things.
     let len = kernel.render_len();
-    assert!(len > 0, "Canvas encoding buffer is empty, expected drawing commands!");
+    assert!(
+        len > 0,
+        "Canvas encoding buffer is empty, expected drawing commands!"
+    );
 }

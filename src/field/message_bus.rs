@@ -47,7 +47,10 @@ impl MessageBus {
         self.payload_slices.push((p_start, p_end));
 
         // Populate fast lookup index
-        self.receiver_index.entry(receiver_id).or_insert_with(Vec::new).push(current_idx);
+        self.receiver_index
+            .entry(receiver_id)
+            .or_insert_with(Vec::new)
+            .push(current_idx);
 
         self.len += 1;
     }

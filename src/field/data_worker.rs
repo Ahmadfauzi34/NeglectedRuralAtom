@@ -80,7 +80,9 @@ impl DataWorkerField {
     }
 
     pub fn kill_worker(&mut self, idx: usize) {
-        if idx >= self.capacity || self.active[idx] == 0 { return; }
+        if idx >= self.capacity || self.active[idx] == 0 {
+            return;
+        }
 
         self.active[idx] = 0;
         self.states[idx] = WorkerState::Idle as u8;

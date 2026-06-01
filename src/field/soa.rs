@@ -1,7 +1,7 @@
 use wasm_bindgen::prelude::*;
 
 /// SOA: Structure of Arrays — cache-friendly, SIMD-ready, no indirection
-/// 
+///
 /// Prinsip:
 /// - Semua field hot path dalam Vec terpisah (continuous memory)
 /// - Pre-allocated capacity, tidak alloc di hot loop
@@ -13,12 +13,12 @@ pub struct AgentField {
     pub(crate) pos_y: Vec<f32>,
     pub(crate) vel_x: Vec<f32>,
     pub(crate) vel_y: Vec<f32>,
-    
+
     // Cold fields — bisa dipisah ke buffer terpisah kalau perlu
     pub(crate) health: Vec<f32>,
     pub(crate) target_id: Vec<u32>,
-    pub(crate) active: Vec<u8>,     // 0 = mati (ghost), 1 = aktif
-    
+    pub(crate) active: Vec<u8>, // 0 = mati (ghost), 1 = aktif
+
     // Behavior / State Machine memory
     // 0 = Idle, 1 = Wandering, 2 = Chasing, 3 = Fleeing
     pub(crate) behavior_state: Vec<u8>,
@@ -51,32 +51,42 @@ impl AgentField {
             capacity: initial_capacity,
         }
     }
-    
+
     /// Pre-grow buffer untuk mencegah alloc di runtime
     pub fn reserve(&mut self, additional: usize) {
         let new_cap = self.len + additional;
-        self.pos_x.reserve(new_cap.saturating_sub(self.pos_x.capacity()));
-        self.pos_y.reserve(new_cap.saturating_sub(self.pos_y.capacity()));
-        self.vel_x.reserve(new_cap.saturating_sub(self.vel_x.capacity()));
-        self.vel_y.reserve(new_cap.saturating_sub(self.vel_y.capacity()));
-        self.health.reserve(new_cap.saturating_sub(self.health.capacity()));
-        self.target_id.reserve(new_cap.saturating_sub(self.target_id.capacity()));
-        self.active.reserve(new_cap.saturating_sub(self.active.capacity()));
-        self.behavior_state.reserve(new_cap.saturating_sub(self.behavior_state.capacity()));
-        self.acc_x.reserve(new_cap.saturating_sub(self.acc_x.capacity()));
-        self.acc_y.reserve(new_cap.saturating_sub(self.acc_y.capacity()));
+        self.pos_x
+            .reserve(new_cap.saturating_sub(self.pos_x.capacity()));
+        self.pos_y
+            .reserve(new_cap.saturating_sub(self.pos_y.capacity()));
+        self.vel_x
+            .reserve(new_cap.saturating_sub(self.vel_x.capacity()));
+        self.vel_y
+            .reserve(new_cap.saturating_sub(self.vel_y.capacity()));
+        self.health
+            .reserve(new_cap.saturating_sub(self.health.capacity()));
+        self.target_id
+            .reserve(new_cap.saturating_sub(self.target_id.capacity()));
+        self.active
+            .reserve(new_cap.saturating_sub(self.active.capacity()));
+        self.behavior_state
+            .reserve(new_cap.saturating_sub(self.behavior_state.capacity()));
+        self.acc_x
+            .reserve(new_cap.saturating_sub(self.acc_x.capacity()));
+        self.acc_y
+            .reserve(new_cap.saturating_sub(self.acc_y.capacity()));
         self.capacity = self.pos_x.capacity();
     }
-    
+
     /// Spawn agent — hanya push ke back, tidak alloc kalau capacity cukup
     pub fn spawn(&mut self, x: f32, y: f32, health: f32) -> usize {
         let idx = self.len;
-        
+
         // Pastikan capacity cukup — ini jarang terjadi kalau reserve() dipanggil di init
         if idx >= self.capacity {
             self.reserve(self.capacity.max(64));
         }
-        
+
         self.pos_x.push(x);
         self.pos_y.push(y);
         self.vel_x.push(0.0);
@@ -87,16 +97,18 @@ impl AgentField {
         self.behavior_state.push(0); // Idle default
         self.acc_x.push(0.0);
         self.acc_y.push(0.0);
-        
+
         self.len += 1;
         idx
     }
-    
+
     /// Ghost state removal: swap-drop alih-alih Vec::remove
     /// O(1), tidak shifting, buffer tidak di-free
     pub fn kill_swap(&mut self, idx: usize) {
-        if idx >= self.len { return; }
-        
+        if idx >= self.len {
+            return;
+        }
+
         let last = self.len - 1;
         if idx != last {
             self.pos_x.swap(idx, last);
@@ -110,37 +122,37 @@ impl AgentField {
             self.acc_x.swap(idx, last);
             self.acc_y.swap(idx, last);
         }
-        
+
         // Ghost: data di 'last' sekarang invalid, tapi buffer tetap ada
         self.len -= 1;
     }
-    
+
     // === Direct pointer access untuk zero-copy ke JS/Canvas ===
-    
+
     pub fn pos_x_ptr(&self) -> *const f32 {
         self.pos_x.as_ptr()
     }
-    
+
     pub fn pos_y_ptr(&self) -> *const f32 {
         self.pos_y.as_ptr()
     }
-    
+
     pub fn vel_x_ptr(&self) -> *const f32 {
         self.vel_x.as_ptr()
     }
-    
+
     pub fn vel_y_ptr(&self) -> *const f32 {
         self.vel_y.as_ptr()
     }
-    
+
     pub fn active_ptr(&self) -> *const u8 {
         self.active.as_ptr()
     }
-    
+
     pub fn agent_count(&self) -> usize {
         self.len
     }
-    
+
     pub fn capacity(&self) -> usize {
         self.capacity
     }

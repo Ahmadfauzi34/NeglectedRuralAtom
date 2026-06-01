@@ -1,6 +1,6 @@
-use rhai::Array;
-use regex::Regex;
 use ndarray::Array1;
+use regex::Regex;
+use rhai::Array;
 use std::cell::RefCell;
 use std::collections::HashMap;
 
@@ -137,11 +137,17 @@ pub fn dot_product(arr_a: Array, arr_b: Array) -> f64 {
         let mut a = 0.0;
         let mut b = 0.0;
 
-        if let Ok(f) = arr_a[i].as_float() { a = f; }
-        else if let Ok(v) = arr_a[i].as_int() { a = v as f64; }
+        if let Ok(f) = arr_a[i].as_float() {
+            a = f;
+        } else if let Ok(v) = arr_a[i].as_int() {
+            a = v as f64;
+        }
 
-        if let Ok(f) = arr_b[i].as_float() { b = f; }
-        else if let Ok(v) = arr_b[i].as_int() { b = v as f64; }
+        if let Ok(f) = arr_b[i].as_float() {
+            b = f;
+        } else if let Ok(v) = arr_b[i].as_int() {
+            b = v as f64;
+        }
 
         dot += a * b;
     }
@@ -155,27 +161,45 @@ pub fn sigmoid(x: f64) -> f64 {
 
 /// Updates a Q-Learning Table value using the Bellman Equation directly in Rust WASM.
 /// q_current = q_current + learning_rate * (reward + discount_factor * max_future_q - q_current)
-pub fn q_learning_update(q_current: f64, reward: f64, max_future_q: f64, learning_rate: f64, discount_factor: f64) -> f64 {
+pub fn q_learning_update(
+    q_current: f64,
+    reward: f64,
+    max_future_q: f64,
+    learning_rate: f64,
+    discount_factor: f64,
+) -> f64 {
     q_current + learning_rate * (reward + discount_factor * max_future_q - q_current)
 }
 
 /// Contextual Meta-Learning (Context Evolution) via Orthogonal Projection.
 /// Allows an agent to evolve its understanding by finding the "novelty" in the broader context
 /// (the orthogonal rejection) and shifting its internal vector towards it.
-pub fn context_evolution(agent_context: Array, broader_context: Array, learning_rate: f64) -> Array {
+pub fn context_evolution(
+    agent_context: Array,
+    broader_context: Array,
+    learning_rate: f64,
+) -> Array {
     let mut vec_a = Vec::with_capacity(agent_context.len());
     let mut vec_b = Vec::with_capacity(broader_context.len());
 
     for item in agent_context {
-        if let Ok(f) = item.as_float() { vec_a.push(f as f64); }
-        else if let Ok(i) = item.as_int() { vec_a.push(i as f64); }
-        else { vec_a.push(0.0); }
+        if let Ok(f) = item.as_float() {
+            vec_a.push(f as f64);
+        } else if let Ok(i) = item.as_int() {
+            vec_a.push(i as f64);
+        } else {
+            vec_a.push(0.0);
+        }
     }
 
     for item in broader_context {
-        if let Ok(f) = item.as_float() { vec_b.push(f as f64); }
-        else if let Ok(i) = item.as_int() { vec_b.push(i as f64); }
-        else { vec_b.push(0.0); }
+        if let Ok(f) = item.as_float() {
+            vec_b.push(f as f64);
+        } else if let Ok(i) = item.as_int() {
+            vec_b.push(i as f64);
+        } else {
+            vec_b.push(0.0);
+        }
     }
 
     let len = vec_a.len().min(vec_b.len());

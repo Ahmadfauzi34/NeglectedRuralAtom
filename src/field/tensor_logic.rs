@@ -1,6 +1,6 @@
 use ndarray::{Array3, Axis};
-use std::sync::Arc;
 use rhai::CustomType;
+use std::sync::Arc;
 
 fn layer_norm(x: &Array3<f32>, eps: f32) -> Array3<f32> {
     let mut out = x.clone();
@@ -10,7 +10,9 @@ fn layer_norm(x: &Array3<f32>, eps: f32) -> Array3<f32> {
             let mean = row.iter().sum::<f32>() / len;
             let var = row.iter().map(|&v| (v - mean).powi(2)).sum::<f32>() / len;
             let std = (var + eps).sqrt();
-            for v in row.iter_mut() { *v = (*v - mean) / std; }
+            for v in row.iter_mut() {
+                *v = (*v - mean) / std;
+            }
         }
     }
     out
@@ -23,7 +25,9 @@ pub struct Tensor3D {
 
 impl Tensor3D {
     pub fn new(data: Array3<f32>) -> Self {
-        Self { data: Arc::new(data) }
+        Self {
+            data: Arc::new(data),
+        }
     }
 
     pub fn zeros(d1: i64, d2: i64, d3: i64) -> Self {
@@ -63,9 +67,13 @@ impl SpectralCore {
         let z = &z_tensor.data;
         let mut output = self.internal_dense_fft(z, steps as f32);
 
-        let total_e: f32 = output.bands_spatial.iter().map(|b| b.mapv(|x| x*x).sum()).sum();
+        let total_e: f32 = output
+            .bands_spatial
+            .iter()
+            .map(|b| b.mapv(|x| x * x).sum())
+            .sum();
         for band in output.bands_spatial.iter_mut() {
-            if (band.mapv(|x| x*x).sum() / (total_e + 1e-6)) < (threshold as f32) {
+            if (band.mapv(|x| x * x).sum() / (total_e + 1e-6)) < (threshold as f32) {
                 band.fill(0.0);
             }
         }
@@ -103,7 +111,9 @@ pub struct OrthogonalFusion {
 
 impl OrthogonalFusion {
     pub fn new(sensitivity: f64) -> Self {
-        Self { sensitivity: sensitivity as f32 }
+        Self {
+            sensitivity: sensitivity as f32,
+        }
     }
 
     pub fn fuse_sparse(
@@ -117,15 +127,20 @@ impl OrthogonalFusion {
         let stream_ref = &*stream_tensor.data;
         let innovation_ref = &*innovation_tensor.data;
 
-        let innov_norm = innovation_ref.mapv(|x| x*x).sum().sqrt();
-        let stream_norm = stream_ref.mapv(|x| x*x).sum().sqrt() + 1e-6;
+        let innov_norm = innovation_ref.mapv(|x| x * x).sum().sqrt();
+        let stream_norm = stream_ref.mapv(|x| x * x).sum().sqrt() + 1e-6;
 
         if (innov_norm / stream_norm) < self.sensitivity {
             return stream_tensor;
         }
 
-        let dot = (stream_ref * innovation_ref).sum_axis(Axis(2)).insert_axis(Axis(2));
-        let energy = (stream_ref * stream_ref).sum_axis(Axis(2)).insert_axis(Axis(2)) + 1e-6;
+        let dot = (stream_ref * innovation_ref)
+            .sum_axis(Axis(2))
+            .insert_axis(Axis(2));
+        let energy = (stream_ref * stream_ref)
+            .sum_axis(Axis(2))
+            .insert_axis(Axis(2))
+            + 1e-6;
         let redundant = (&dot / &energy) * stream_ref;
         let pure_innovation = innovation_ref - &redundant;
 
