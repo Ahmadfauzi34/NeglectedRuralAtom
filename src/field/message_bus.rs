@@ -18,6 +18,7 @@ pub struct MessageBus {
     pub(crate) receiver_index: HashMap<u32, Vec<usize>>,
 
     pub(crate) len: usize,
+    pub(crate) max_arena_bytes: usize,
 }
 
 impl MessageBus {
@@ -30,23 +31,38 @@ impl MessageBus {
             payload_slices: Vec::with_capacity(initial_capacity),
             receiver_index: HashMap::with_capacity(initial_capacity),
             len: 0,
+            // Dynamic capacity based on initial setup.
+            // Ensures messages can scale linearly with agents, while bounding runaway loops.
+            max_arena_bytes: initial_capacity * 2048,
         }
     }
 
     /// Sends a message from one agent to another (or broadcast if receiver_id == BROADCAST_ID).
     pub fn send_message(&mut self, sender_id: u32, receiver_id: u32, msg_type: u8, payload: &str) {
-        // Anti-memory-leak: Cap maximum arena size per cycle to 5MB, max 2048 bytes per payload (UTF-8 safe)
+        // Anti-memory-leak: Prevent unbounded vector structural growth.
+        // Max messages dynamically linked to arena bytes (assuming avg ~32 bytes per message)
+        let structural_max_messages = self.max_arena_bytes / 32;
+        if self.sender_ids.len() >= structural_max_messages {
+            return;
+        }
+
         let mut safe_payload = payload;
-        if safe_payload.len() > 2048 {
-            let mut end = 2048;
+
+        // Anti-memory-leak: Dynamically cap the global text arena.
+        // Drops message entirely if 0 bytes available, else gracefully truncates.
+        if self.text_arena.len() + safe_payload.len() > self.max_arena_bytes {
+            let available = self.max_arena_bytes.saturating_sub(self.text_arena.len());
+            if available == 0 && payload.len() > 0 {
+                return; // Dropped to prevent memory ballooning
+            }
+            let mut end = available;
+            if end > safe_payload.len() {
+                end = safe_payload.len();
+            }
             while end > 0 && !safe_payload.is_char_boundary(end) {
                 end -= 1;
             }
             safe_payload = &safe_payload[..end];
-        }
-
-        if self.text_arena.len() + safe_payload.len() > 5_000_000 {
-            return; // Dropped to prevent memory ballooning
         }
 
         let p_start = self.text_arena.len() as u32;

@@ -18,6 +18,10 @@ pub struct VectorMemory {
 
     // Capacity limit to prevent unbounded memory growth
     pub(crate) max_capacity: usize,
+
+    // Dynamic tracking of total bytes allocated by memory_ids
+    pub(crate) total_id_bytes: usize,
+    pub(crate) max_id_bytes: usize,
 }
 
 impl VectorMemory {
@@ -28,6 +32,10 @@ impl VectorMemory {
             magnitudes: Vec::with_capacity(capacity),
             len: 0,
             max_capacity: capacity,
+            total_id_bytes: 0,
+            // Dynamic capacity pool (e.g. max_capacity * 1024 bytes) allows large textual payloads
+            // as long as the global quota is not reached.
+            max_id_bytes: capacity * 1024,
         }
     }
 
@@ -42,16 +50,26 @@ impl VectorMemory {
             return;
         }
 
-        // Enforce max string length for ID/Payload (UTF-8 safe truncation)
         let mut safe_id = memory_id.to_string();
-        if safe_id.len() > 1024 {
-            let mut end = 1024;
+        let projected_bytes = self.total_id_bytes + safe_id.len();
+
+        // Dynamic capacity fallback instead of rigid 1024-byte hard limit
+        if projected_bytes > self.max_id_bytes {
+            let available = self.max_id_bytes.saturating_sub(self.total_id_bytes);
+            if available == 0 {
+                return; // Drops entirely if no text quota remains
+            }
+            let mut end = available;
+            if end > safe_id.len() {
+                end = safe_id.len();
+            }
             while end > 0 && !safe_id.is_char_boundary(end) {
                 end -= 1;
             }
             safe_id.truncate(end);
         }
 
+        self.total_id_bytes += safe_id.len();
         self.memory_ids.push(safe_id);
         self.vectors.extend_from_slice(vector);
 
@@ -110,5 +128,6 @@ impl VectorMemory {
         self.vectors.clear();
         self.magnitudes.clear();
         self.len = 0;
+        self.total_id_bytes = 0;
     }
 }

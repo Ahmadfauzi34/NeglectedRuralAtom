@@ -25,18 +25,23 @@ pub struct CompiledNode {
 
 /// The Shared Context allowing Stateful Intelligence across graph nodes.
 /// Node 1 can save data here, and Node 5 can retrieve it.
+// Dynamic quota for the total length of keys stored in Graph Context (e.g. 2 MB)
+const MAX_CONTEXT_KEY_BYTES: usize = 2 * 1024 * 1024;
+
 #[derive(Clone, CustomType)]
 pub struct GraphContext {
     // We use Rhai's dynamic types to store arbitrary structured data between nodes.
     // Wrapped internally in an `Arc<RwLock>` if async mutation was required,
     // but synchronous linear execution is fine with standard ownership.
     memory: HashMap<String, Dynamic>,
+    total_key_bytes: usize,
 }
 
 impl GraphContext {
     pub fn new() -> Self {
         Self {
             memory: HashMap::new(),
+            total_key_bytes: 0,
         }
     }
 
@@ -45,25 +50,42 @@ impl GraphContext {
     }
 
     pub fn set_var(&mut self, key: &str, val: Dynamic) {
-        // Anti-memory-leak: Prevent unbound accumulation of variables in shared context
-        if self.memory.len() >= 256 {
-            return; // Context memory full, ignore new variables
-        }
-
         let mut safe_key = key.to_string();
-        if safe_key.len() > 128 {
-            let mut end = 128;
+
+        // Truncate first so we use the exact same key for accounting
+        let projected_size_initial = self.total_key_bytes + safe_key.len();
+        if projected_size_initial > MAX_CONTEXT_KEY_BYTES {
+            let available = MAX_CONTEXT_KEY_BYTES.saturating_sub(self.total_key_bytes);
+            let mut end = available;
+            if end > safe_key.len() {
+                end = safe_key.len();
+            }
             while end > 0 && !safe_key.is_char_boundary(end) {
                 end -= 1;
             }
             safe_key.truncate(end);
         }
 
+        // Anti-memory-leak: Prevent unbounded HashMap structural / Tensor growth.
+        // Assuming average 128 bytes per entry minimum, limit max items structurally.
+        let structural_max_items = MAX_CONTEXT_KEY_BYTES / 128;
+        if self.memory.len() >= structural_max_items && !self.memory.contains_key(&safe_key) {
+            return;
+        }
+
+        let old_size = self.memory.get_key_value(&safe_key).map_or(0, |(k, _)| k.len());
+
+        if safe_key.len() == 0 && old_size == 0 && self.total_key_bytes >= MAX_CONTEXT_KEY_BYTES {
+            return; // No capacity left at all
+        }
+
+        self.total_key_bytes = (self.total_key_bytes - old_size) + safe_key.len();
         self.memory.insert(safe_key, val);
     }
 
     pub fn clear(&mut self) {
         self.memory.clear();
+        self.total_key_bytes = 0;
     }
 }
 
