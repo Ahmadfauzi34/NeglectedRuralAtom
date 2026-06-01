@@ -35,8 +35,22 @@ impl MessageBus {
 
     /// Sends a message from one agent to another (or broadcast if receiver_id == BROADCAST_ID).
     pub fn send_message(&mut self, sender_id: u32, receiver_id: u32, msg_type: u8, payload: &str) {
+        // Anti-memory-leak: Cap maximum arena size per cycle to 5MB, max 2048 bytes per payload (UTF-8 safe)
+        let mut safe_payload = payload;
+        if safe_payload.len() > 2048 {
+            let mut end = 2048;
+            while end > 0 && !safe_payload.is_char_boundary(end) {
+                end -= 1;
+            }
+            safe_payload = &safe_payload[..end];
+        }
+
+        if self.text_arena.len() + safe_payload.len() > 5_000_000 {
+            return; // Dropped to prevent memory ballooning
+        }
+
         let p_start = self.text_arena.len() as u32;
-        self.text_arena.push_str(payload);
+        self.text_arena.push_str(safe_payload);
         let p_end = self.text_arena.len() as u32;
 
         let current_idx = self.len;

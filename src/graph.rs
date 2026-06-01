@@ -45,7 +45,21 @@ impl GraphContext {
     }
 
     pub fn set_var(&mut self, key: &str, val: Dynamic) {
-        self.memory.insert(key.to_string(), val);
+        // Anti-memory-leak: Prevent unbound accumulation of variables in shared context
+        if self.memory.len() >= 256 {
+            return; // Context memory full, ignore new variables
+        }
+
+        let mut safe_key = key.to_string();
+        if safe_key.len() > 128 {
+            let mut end = 128;
+            while end > 0 && !safe_key.is_char_boundary(end) {
+                end -= 1;
+            }
+            safe_key.truncate(end);
+        }
+
+        self.memory.insert(safe_key, val);
     }
 
     pub fn clear(&mut self) {

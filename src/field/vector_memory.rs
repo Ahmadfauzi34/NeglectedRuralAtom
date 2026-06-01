@@ -15,6 +15,9 @@ pub struct VectorMemory {
     pub(crate) magnitudes: Vec<f32>,
 
     pub(crate) len: usize,
+
+    // Capacity limit to prevent unbounded memory growth
+    pub(crate) max_capacity: usize,
 }
 
 impl VectorMemory {
@@ -24,6 +27,7 @@ impl VectorMemory {
             vectors: Vec::with_capacity(capacity * EMBEDDING_DIM),
             magnitudes: Vec::with_capacity(capacity),
             len: 0,
+            max_capacity: capacity,
         }
     }
 
@@ -33,7 +37,22 @@ impl VectorMemory {
             return; // Ignore malformed vectors
         }
 
-        self.memory_ids.push(memory_id.to_string());
+        // Anti-memory-leak: Prevent unbounded growth from malicious/runaway LLM scripts
+        if self.len >= self.max_capacity {
+            return;
+        }
+
+        // Enforce max string length for ID/Payload (UTF-8 safe truncation)
+        let mut safe_id = memory_id.to_string();
+        if safe_id.len() > 1024 {
+            let mut end = 1024;
+            while end > 0 && !safe_id.is_char_boundary(end) {
+                end -= 1;
+            }
+            safe_id.truncate(end);
+        }
+
+        self.memory_ids.push(safe_id);
         self.vectors.extend_from_slice(vector);
 
         let mag_sq: f32 = vector.iter().map(|v| v * v).sum();

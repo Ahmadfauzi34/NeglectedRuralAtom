@@ -60,8 +60,24 @@ impl DataWorkerField {
             None => return -1, // Buffer full
         };
 
+        // Anti-memory-leak: Cap maximum arena size per cycle to 5MB to prevent extreme exponential growth
+        // Also truncate payload to max 4096 bytes (UTF-8 safe)
+        let mut safe_payload = payload;
+        if safe_payload.len() > 4096 {
+            let mut end = 4096;
+            while end > 0 && !safe_payload.is_char_boundary(end) {
+                end -= 1;
+            }
+            safe_payload = &safe_payload[..end];
+        }
+
+        if self.text_arena.len() + safe_payload.len() > 5_000_000 {
+            self.free_slots.push(idx); // Refund slot
+            return -1; // Memory quota exceeded
+        }
+
         let p_start = self.text_arena.len() as u32;
-        self.text_arena.push_str(payload);
+        self.text_arena.push_str(safe_payload);
         let p_end = self.text_arena.len() as u32;
 
         self.active[idx] = 1;
