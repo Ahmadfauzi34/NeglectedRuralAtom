@@ -653,6 +653,11 @@ impl ScriptEngine {
         engine.register_fn("get_cursor_y", ConfigContext::get_cursor_y);
         engine.register_fn("get_cursor_weight", ConfigContext::get_cursor_weight);
 
+        // Graph Context (for AST caching parallel execution)
+        engine.build_type::<crate::graph::GraphContext>();
+        engine.register_fn("get_var", crate::graph::GraphContext::get_var);
+        engine.register_fn("set_var", crate::graph::GraphContext::set_var);
+
         // --- SVG AND PLOTTING APIS FOR RHAI ---
         // Allows LLM to dynamically generate generic statistical charts
         engine.register_fn(

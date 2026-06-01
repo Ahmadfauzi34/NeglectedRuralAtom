@@ -402,30 +402,30 @@ impl MemoryView {
     /// Creates a Float32Array over WASM linear memory.
     /// # Safety
     /// The caller must ensure `ptr` is valid for `len` elements and the memory is not accessed mutably or reallocated while the view is active.
-    pub unsafe fn float32_array(ptr: *const f32, len: usize) -> js_sys::Float32Array {
-        js_sys::Float32Array::view(std::slice::from_raw_parts(ptr, len))
+    pub fn float32_array(ptr: *const f32, len: usize) -> js_sys::Float32Array {
+        unsafe { js_sys::Float32Array::view(std::slice::from_raw_parts(ptr, len)) }
     }
 
     /// Creates a Uint8Array over WASM linear memory.
     /// # Safety
     /// The caller must ensure `ptr` is valid for `len` elements and the memory is not accessed mutably or reallocated while the view is active.
-    pub unsafe fn uint8_array(ptr: *const u8, len: usize) -> js_sys::Uint8Array {
-        js_sys::Uint8Array::view(std::slice::from_raw_parts(ptr, len))
+    pub fn uint8_array(ptr: *const u8, len: usize) -> js_sys::Uint8Array {
+        unsafe { js_sys::Uint8Array::view(std::slice::from_raw_parts(ptr, len)) }
     }
 
     /// Reads a u32 from WASM linear memory safely.
     /// # Safety
     /// The caller must ensure `ptr` points to at least 4 contiguous bytes.
-    pub unsafe fn read_u32(ptr: *const u8) -> u32 {
-        let slice = std::slice::from_raw_parts(ptr, 4);
+    pub fn read_u32(ptr: *const u8) -> u32 {
+        let slice = unsafe { std::slice::from_raw_parts(ptr, 4) };
         u32::from_le_bytes([slice[0], slice[1], slice[2], slice[3]])
     }
 
     /// Reads an f32 from WASM linear memory safely.
     /// # Safety
     /// The caller must ensure `ptr` points to at least 4 contiguous bytes.
-    pub unsafe fn read_f32(ptr: *const u8) -> f32 {
-        let slice = std::slice::from_raw_parts(ptr, 4);
+    pub fn read_f32(ptr: *const u8) -> f32 {
+        let slice = unsafe { std::slice::from_raw_parts(ptr, 4) };
         f32::from_le_bytes([slice[0], slice[1], slice[2], slice[3]])
     }
 }
