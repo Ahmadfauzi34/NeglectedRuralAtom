@@ -20,13 +20,6 @@ impl VirtualFileSystem {
     }
 
     pub fn write_file(&mut self, path: &str, content: &str) {
-        // Anti-memory-leak: Prevent unbound HashMap structural growth.
-        // A dynamic structural limit based on total bytes (assume avg 4KB per file + 128 keys)
-        let max_structural_files = MAX_VFS_CAPACITY_BYTES / 4096;
-        if self.files.len() >= max_structural_files && !self.files.contains_key(path) {
-            return;
-        }
-
         let mut safe_path = path.to_string();
         if safe_path.len() > 256 {
             let mut end = 256;
@@ -34,6 +27,13 @@ impl VirtualFileSystem {
                 end -= 1;
             }
             safe_path.truncate(end);
+        }
+
+        // Anti-memory-leak: Prevent unbound HashMap structural growth.
+        // A dynamic structural limit based on total bytes (assume avg 4KB per file + 128 keys)
+        let max_structural_files = MAX_VFS_CAPACITY_BYTES / 4096;
+        if self.files.len() >= max_structural_files && !self.files.contains_key(&safe_path) {
+            return;
         }
 
         // Calculate size difference if file already exists
@@ -72,12 +72,6 @@ impl VirtualFileSystem {
     }
 
     pub fn edit_file(&mut self, path: &str, append_content: &str) {
-        // Anti-memory-leak: Prevent unbound HashMap structural growth.
-        let max_structural_files = MAX_VFS_CAPACITY_BYTES / 4096;
-        if self.files.len() >= max_structural_files && !self.files.contains_key(path) {
-            return;
-        }
-
         let mut safe_path = path.to_string();
         if safe_path.len() > 256 {
             let mut end = 256;
@@ -85,6 +79,12 @@ impl VirtualFileSystem {
                 end -= 1;
             }
             safe_path.truncate(end);
+        }
+
+        // Anti-memory-leak: Prevent unbound HashMap structural growth.
+        let max_structural_files = MAX_VFS_CAPACITY_BYTES / 4096;
+        if self.files.len() >= max_structural_files && !self.files.contains_key(&safe_path) {
+            return;
         }
 
         let projected_total = self.total_bytes + append_content.len();

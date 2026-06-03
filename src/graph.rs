@@ -51,11 +51,16 @@ impl GraphContext {
 
     pub fn set_var(&mut self, key: &str, val: Dynamic) {
         let mut safe_key = key.to_string();
+        let structural_max_items = MAX_CONTEXT_KEY_BYTES / 128;
 
-        // Truncate first so we use the exact same key for accounting
-        let projected_size_initial = self.total_key_bytes + safe_key.len();
-        if projected_size_initial > MAX_CONTEXT_KEY_BYTES {
-            let available = MAX_CONTEXT_KEY_BYTES.saturating_sub(self.total_key_bytes);
+        let initial_old_size = self.memory.get_key_value(&safe_key).map_or(0, |(k, _)| k.len());
+        let projected_size = (self.total_key_bytes - initial_old_size) + safe_key.len();
+
+        if projected_size > MAX_CONTEXT_KEY_BYTES {
+            let available = MAX_CONTEXT_KEY_BYTES.saturating_sub(self.total_key_bytes - initial_old_size);
+            if available == 0 {
+                return; // Context key quota completely full
+            }
             let mut end = available;
             if end > safe_key.len() {
                 end = safe_key.len();
@@ -66,20 +71,30 @@ impl GraphContext {
             safe_key.truncate(end);
         }
 
-        // Anti-memory-leak: Prevent unbounded HashMap structural / Tensor growth.
-        // Assuming average 128 bytes per entry minimum, limit max items structurally.
-        let structural_max_items = MAX_CONTEXT_KEY_BYTES / 128;
         if self.memory.len() >= structural_max_items && !self.memory.contains_key(&safe_key) {
             return;
         }
 
-        let old_size = self.memory.get_key_value(&safe_key).map_or(0, |(k, _)| k.len());
+        // Re-evaluate old_size because safe_key might have been truncated and could now
+        // match a different existing key in the HashMap.
+        let actual_old_size = self.memory.get_key_value(&safe_key).map_or(0, |(k, _)| k.len());
 
-        if safe_key.len() == 0 && old_size == 0 && self.total_key_bytes >= MAX_CONTEXT_KEY_BYTES {
-            return; // No capacity left at all
+        // Prevent double accounting if the truncated key matches an existing one.
+        // We only add the length of the new key, and subtract the length of the key it overwrites.
+        // If it was truncated, initial_old_size (for the un-truncated key) is irrelevant to the final state.
+        // We must also undo the subtraction of initial_old_size if it didn't end up being overwritten.
+
+        let mut new_total = self.total_key_bytes;
+        // If the original long key existed and we ARE NOT overwriting it (because we truncated),
+        // we shouldn't have subtracted it. But we didn't subtract it from self.total_key_bytes yet anyway.
+
+        new_total = (new_total - actual_old_size) + safe_key.len();
+
+        if new_total > MAX_CONTEXT_KEY_BYTES {
+             return; // Failsafe
         }
 
-        self.total_key_bytes = (self.total_key_bytes - old_size) + safe_key.len();
+        self.total_key_bytes = new_total;
         self.memory.insert(safe_key, val);
     }
 

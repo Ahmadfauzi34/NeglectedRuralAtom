@@ -170,13 +170,16 @@ impl SpectralCore {
         let z = &z_tensor.data;
         let mut output = self.internal_dense_fft(z, steps as f32);
 
+        // Optimize: Zero-allocation iterative math instead of allocating new Arrays via mapv()
         let total_e: f32 = output
             .bands_spatial
             .iter()
-            .map(|b| b.mapv(|x| x * x).sum())
+            .map(|b| b.iter().map(|&x| x * x).sum::<f32>())
             .sum();
+
         for band in output.bands_spatial.iter_mut() {
-            if (band.mapv(|x| x * x).sum() / (total_e + 1e-6)) < (threshold as f32) {
+            let band_energy: f32 = band.iter().map(|&x| x * x).sum();
+            if (band_energy / (total_e + 1e-6)) < (threshold as f32) {
                 band.fill(0.0);
             }
         }

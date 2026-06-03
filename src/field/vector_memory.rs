@@ -11,8 +11,8 @@ pub struct VectorMemory {
     // A flattened 1D array representing a 2D matrix of embeddings (count * EMBEDDING_DIM)
     pub(crate) vectors: Vec<f32>,
 
-    // Cached magnitudes to speed up cosine similarity
-    pub(crate) magnitudes: Vec<f32>,
+    // Cached inverse magnitudes to speed up cosine similarity
+    pub(crate) inv_magnitudes: Vec<f32>,
 
     pub(crate) len: usize,
 
@@ -29,7 +29,7 @@ impl VectorMemory {
         Self {
             memory_ids: Vec::with_capacity(capacity),
             vectors: Vec::with_capacity(capacity * EMBEDDING_DIM),
-            magnitudes: Vec::with_capacity(capacity),
+            inv_magnitudes: Vec::with_capacity(capacity),
             len: 0,
             max_capacity: capacity,
             total_id_bytes: 0,
@@ -74,7 +74,8 @@ impl VectorMemory {
         self.vectors.extend_from_slice(vector);
 
         let mag_sq: f32 = vector.iter().map(|v| v * v).sum();
-        self.magnitudes.push(mag_sq.sqrt() + 1e-6);
+        // Optimize: Store the inverse magnitude so search() only needs to multiply
+        self.inv_magnitudes.push(1.0 / (mag_sq.sqrt() + 1e-6));
 
         self.len += 1;
     }
@@ -98,9 +99,9 @@ impl VectorMemory {
             return None;
         }
 
-        // Calculate query magnitude for cosine similarity
+        // Calculate query inverse magnitude for cosine similarity
         let query_mag_sq: f32 = query_vector.iter().map(|v| v * v).sum();
-        let query_mag = query_mag_sq.sqrt() + 1e-6;
+        let inv_query_mag = 1.0 / (query_mag_sq.sqrt() + 1e-6);
 
         let mut best_idx = 0;
         let mut best_score = f32::NEG_INFINITY;
@@ -110,9 +111,10 @@ impl VectorMemory {
             let target_vec = &self.vectors[start..start + EMBEDDING_DIM];
 
             let dot = self.dot_product(query_vector, target_vec);
-            let target_mag = self.magnitudes[i];
+            let inv_target_mag = self.inv_magnitudes[i];
 
-            let cosine_similarity = dot / (query_mag * target_mag);
+            // Optimized Cosine Similarity: O(1) multiplications instead of divisions
+            let cosine_similarity = dot * inv_query_mag * inv_target_mag;
 
             if cosine_similarity > best_score {
                 best_score = cosine_similarity;
@@ -126,7 +128,7 @@ impl VectorMemory {
     pub fn clear(&mut self) {
         self.memory_ids.clear();
         self.vectors.clear();
-        self.magnitudes.clear();
+        self.inv_magnitudes.clear();
         self.len = 0;
         self.total_id_bytes = 0;
     }
