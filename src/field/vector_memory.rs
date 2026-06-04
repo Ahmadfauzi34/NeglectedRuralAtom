@@ -11,10 +11,17 @@ pub struct VectorMemory {
     // A flattened 1D array representing a 2D matrix of embeddings (count * EMBEDDING_DIM)
     pub(crate) vectors: Vec<f32>,
 
-    // Cached magnitudes to speed up cosine similarity
-    pub(crate) magnitudes: Vec<f32>,
+    // Cached inverse magnitudes to speed up cosine similarity
+    pub(crate) inv_magnitudes: Vec<f32>,
 
     pub(crate) len: usize,
+
+    // Capacity limit to prevent unbounded memory growth
+    pub(crate) max_capacity: usize,
+
+    // Dynamic tracking of total bytes allocated by memory_ids
+    pub(crate) total_id_bytes: usize,
+    pub(crate) max_id_bytes: usize,
 }
 
 impl VectorMemory {
@@ -22,8 +29,13 @@ impl VectorMemory {
         Self {
             memory_ids: Vec::with_capacity(capacity),
             vectors: Vec::with_capacity(capacity * EMBEDDING_DIM),
-            magnitudes: Vec::with_capacity(capacity),
+            inv_magnitudes: Vec::with_capacity(capacity),
             len: 0,
+            max_capacity: capacity,
+            total_id_bytes: 0,
+            // Dynamic capacity pool (e.g. max_capacity * 1024 bytes) allows large textual payloads
+            // as long as the global quota is not reached.
+            max_id_bytes: capacity * 1024,
         }
     }
 
@@ -33,11 +45,37 @@ impl VectorMemory {
             return; // Ignore malformed vectors
         }
 
-        self.memory_ids.push(memory_id.to_string());
+        // Anti-memory-leak: Prevent unbounded growth from malicious/runaway LLM scripts
+        if self.len >= self.max_capacity {
+            return;
+        }
+
+        let mut safe_id = memory_id.to_string();
+        let projected_bytes = self.total_id_bytes + safe_id.len();
+
+        // Dynamic capacity fallback instead of rigid 1024-byte hard limit
+        if projected_bytes > self.max_id_bytes {
+            let available = self.max_id_bytes.saturating_sub(self.total_id_bytes);
+            if available == 0 {
+                return; // Drops entirely if no text quota remains
+            }
+            let mut end = available;
+            if end > safe_id.len() {
+                end = safe_id.len();
+            }
+            while end > 0 && !safe_id.is_char_boundary(end) {
+                end -= 1;
+            }
+            safe_id.truncate(end);
+        }
+
+        self.total_id_bytes += safe_id.len();
+        self.memory_ids.push(safe_id);
         self.vectors.extend_from_slice(vector);
 
         let mag_sq: f32 = vector.iter().map(|v| v * v).sum();
-        self.magnitudes.push(mag_sq.sqrt() + 1e-6);
+        // Optimize: Store the inverse magnitude so search() only needs to multiply
+        self.inv_magnitudes.push(1.0 / (mag_sq.sqrt() + 1e-6));
 
         self.len += 1;
     }
@@ -61,9 +99,9 @@ impl VectorMemory {
             return None;
         }
 
-        // Calculate query magnitude for cosine similarity
+        // Calculate query inverse magnitude for cosine similarity
         let query_mag_sq: f32 = query_vector.iter().map(|v| v * v).sum();
-        let query_mag = query_mag_sq.sqrt() + 1e-6;
+        let inv_query_mag = 1.0 / (query_mag_sq.sqrt() + 1e-6);
 
         let mut best_idx = 0;
         let mut best_score = f32::NEG_INFINITY;
@@ -73,9 +111,10 @@ impl VectorMemory {
             let target_vec = &self.vectors[start..start + EMBEDDING_DIM];
 
             let dot = self.dot_product(query_vector, target_vec);
-            let target_mag = self.magnitudes[i];
+            let inv_target_mag = self.inv_magnitudes[i];
 
-            let cosine_similarity = dot / (query_mag * target_mag);
+            // Optimized Cosine Similarity: O(1) multiplications instead of divisions
+            let cosine_similarity = dot * inv_query_mag * inv_target_mag;
 
             if cosine_similarity > best_score {
                 best_score = cosine_similarity;
@@ -89,7 +128,8 @@ impl VectorMemory {
     pub fn clear(&mut self) {
         self.memory_ids.clear();
         self.vectors.clear();
-        self.magnitudes.clear();
+        self.inv_magnitudes.clear();
         self.len = 0;
+        self.total_id_bytes = 0;
     }
 }

@@ -25,18 +25,23 @@ pub struct CompiledNode {
 
 /// The Shared Context allowing Stateful Intelligence across graph nodes.
 /// Node 1 can save data here, and Node 5 can retrieve it.
+// Dynamic quota for the total length of keys stored in Graph Context (e.g. 2 MB)
+const MAX_CONTEXT_KEY_BYTES: usize = 2 * 1024 * 1024;
+
 #[derive(Clone, CustomType)]
 pub struct GraphContext {
     // We use Rhai's dynamic types to store arbitrary structured data between nodes.
     // Wrapped internally in an `Arc<RwLock>` if async mutation was required,
     // but synchronous linear execution is fine with standard ownership.
     memory: HashMap<String, Dynamic>,
+    total_key_bytes: usize,
 }
 
 impl GraphContext {
     pub fn new() -> Self {
         Self {
             memory: HashMap::new(),
+            total_key_bytes: 0,
         }
     }
 
@@ -45,11 +50,57 @@ impl GraphContext {
     }
 
     pub fn set_var(&mut self, key: &str, val: Dynamic) {
-        self.memory.insert(key.to_string(), val);
+        let mut safe_key = key.to_string();
+        let structural_max_items = MAX_CONTEXT_KEY_BYTES / 128;
+
+        let initial_old_size = self.memory.get_key_value(&safe_key).map_or(0, |(k, _)| k.len());
+        let projected_size = (self.total_key_bytes - initial_old_size) + safe_key.len();
+
+        if projected_size > MAX_CONTEXT_KEY_BYTES {
+            let available = MAX_CONTEXT_KEY_BYTES.saturating_sub(self.total_key_bytes - initial_old_size);
+            if available == 0 {
+                return; // Context key quota completely full
+            }
+            let mut end = available;
+            if end > safe_key.len() {
+                end = safe_key.len();
+            }
+            while end > 0 && !safe_key.is_char_boundary(end) {
+                end -= 1;
+            }
+            safe_key.truncate(end);
+        }
+
+        if self.memory.len() >= structural_max_items && !self.memory.contains_key(&safe_key) {
+            return;
+        }
+
+        // Re-evaluate old_size because safe_key might have been truncated and could now
+        // match a different existing key in the HashMap.
+        let actual_old_size = self.memory.get_key_value(&safe_key).map_or(0, |(k, _)| k.len());
+
+        // Prevent double accounting if the truncated key matches an existing one.
+        // We only add the length of the new key, and subtract the length of the key it overwrites.
+        // If it was truncated, initial_old_size (for the un-truncated key) is irrelevant to the final state.
+        // We must also undo the subtraction of initial_old_size if it didn't end up being overwritten.
+
+        let mut new_total = self.total_key_bytes;
+        // If the original long key existed and we ARE NOT overwriting it (because we truncated),
+        // we shouldn't have subtracted it. But we didn't subtract it from self.total_key_bytes yet anyway.
+
+        new_total = (new_total - actual_old_size) + safe_key.len();
+
+        if new_total > MAX_CONTEXT_KEY_BYTES {
+             return; // Failsafe
+        }
+
+        self.total_key_bytes = new_total;
+        self.memory.insert(safe_key, val);
     }
 
     pub fn clear(&mut self) {
         self.memory.clear();
+        self.total_key_bytes = 0;
     }
 }
 

@@ -253,11 +253,14 @@ pub fn step_agents(
                         let dx = field.pos_x[j] - px;
                         let dy = field.pos_y[j] - py;
                         let dist_sq = dx * dx + dy * dy;
-                        let dist = dist_sq.sqrt() + 1e-6;
-                        // Exponentially strong flee force the closer the predator is
-                        let flee_force = (inf_r * 2.0) / dist * 50.0;
-                        ax -= (dx / dist) * flee_force;
-                        ay -= (dy / dist) * flee_force;
+                        // Optimize: skip sqrt if distance is far beyond double influence radius
+                        if dist_sq < (inf_r_sq * 4.0) {
+                            let dist = dist_sq.sqrt() + 1e-6;
+                            // Exponentially strong flee force the closer the predator is
+                            let flee_force = (inf_r * 2.0) / dist * 50.0;
+                            ax -= (dx / dist) * flee_force;
+                            ay -= (dy / dist) * flee_force;
+                        }
                     }
                 }
             }

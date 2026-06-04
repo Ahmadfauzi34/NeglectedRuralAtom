@@ -28,6 +28,7 @@ pub struct DataWorkerField {
     pub(crate) free_slots: Vec<usize>,
     pub(crate) len: usize,
     capacity: usize,
+    max_arena_bytes: usize,
 }
 
 impl DataWorkerField {
@@ -50,6 +51,9 @@ impl DataWorkerField {
             free_slots,
             len: 0,
             capacity,
+            // Dynamic capacity based on worker count limit.
+            // Ex: 10,000 workers * 4KB = ~40MB dynamic quota.
+            max_arena_bytes: capacity * 4096,
         }
     }
 
@@ -60,8 +64,29 @@ impl DataWorkerField {
             None => return -1, // Buffer full
         };
 
+        let mut safe_payload = payload;
+
+        // Anti-memory-leak: Dynamically cap the text arena.
+        // Instead of outright rejecting or hard-capping single payload sizes,
+        // gracefully truncate the payload if we hit the global arena limit to retain partial data.
+        if self.text_arena.len() + safe_payload.len() > self.max_arena_bytes {
+            let available = self.max_arena_bytes.saturating_sub(self.text_arena.len());
+            if available == 0 {
+                self.free_slots.push(idx); // Refund slot
+                return -1; // Memory quota completely exhausted
+            }
+            let mut end = available;
+            if end > safe_payload.len() {
+                end = safe_payload.len();
+            }
+            while end > 0 && !safe_payload.is_char_boundary(end) {
+                end -= 1;
+            }
+            safe_payload = &safe_payload[..end];
+        }
+
         let p_start = self.text_arena.len() as u32;
-        self.text_arena.push_str(payload);
+        self.text_arena.push_str(safe_payload);
         let p_end = self.text_arena.len() as u32;
 
         self.active[idx] = 1;
