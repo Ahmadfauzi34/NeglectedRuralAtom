@@ -1,3 +1,0 @@
-## 2024-06-04 - Hot loop speed clamping optimization
-**Learning:** In highly optimized WASM/Rust hot loops, branchless math is not strictly better than branched logic when you can bypass expensive operations. Calculating a `.sqrt()` every frame for all agents regardless of their speed was slower than inserting an `if speed_sq > max_speed_sq` branch, which effectively skipped the `sqrt` for agents traveling under the max speed limit.
-**Action:** When inspecting hot loops, look for expensive math operations (like division or square root) that can be short-circuited or skipped with a conditional branch if the condition is not frequently met or highly predictable.

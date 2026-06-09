@@ -1,5 +1,5 @@
-use regex::Regex;
 use std::collections::HashMap;
+use regex::Regex;
 
 // Maximum total capacity for the Virtual File System (e.g. 64 MB)
 // This allows dynamic files (some very large, some very small) without arbitrary file count limits.
@@ -45,8 +45,7 @@ impl VirtualFileSystem {
         // Anti-memory-leak: Cap global VFS size dynamically
         if projected_total > MAX_VFS_CAPACITY_BYTES {
             // If it exceeds global quota, we try to fit as much as we safely can
-            let available_space =
-                MAX_VFS_CAPACITY_BYTES.saturating_sub(self.total_bytes - old_size);
+            let available_space = MAX_VFS_CAPACITY_BYTES.saturating_sub(self.total_bytes - old_size);
             if available_space == 0 {
                 return; // No space left
             }

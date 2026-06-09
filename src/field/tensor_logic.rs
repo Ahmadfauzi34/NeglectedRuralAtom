@@ -189,12 +189,7 @@ impl SpectralCore {
 }
 
 #[inline(always)]
-fn convolve_kernel_3d(
-    _input: &Array3<f32>,
-    _output: &mut Array3<f32>,
-    _freq: f32,
-    _d_model: usize,
-) {
+fn convolve_kernel_3d(_input: &Array3<f32>, _output: &mut Array3<f32>, _freq: f32, _d_model: usize) {
     // Implementasi kernel convolution tanpa closure alloc
     // Gunakan SOA-friendly indexing untuk cache locality
 }

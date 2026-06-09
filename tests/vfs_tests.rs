@@ -6,9 +6,7 @@ fn test_virtual_file_system_operations() {
 
     // 1. Write and read file
     vfs.write_file("data/config.json", "{\"setting\": true}");
-    let content = vfs
-        .read_file("data/config.json")
-        .expect("File should exist");
+    let content = vfs.read_file("data/config.json").expect("File should exist");
     assert_eq!(content, "{\"setting\": true}");
 
     // 2. Edit file (append)

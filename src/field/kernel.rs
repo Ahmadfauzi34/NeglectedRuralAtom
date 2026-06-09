@@ -275,16 +275,15 @@ pub fn step_agents(
         field.vel_x[i] *= friction;
         field.vel_y[i] *= friction;
 
-        // Clamp speed
+        // Clamp speed — branchless menggunakan min/max
         let vx = field.vel_x[i];
         let vy = field.vel_y[i];
         let speed_sq = vx * vx + vy * vy;
 
-        let factor = if speed_sq > max_speed_sq {
-            config.max_speed / speed_sq.sqrt()
-        } else {
-            1.0
-        };
+        // Kalau speed_sq > max_speed_sq, scale down — branchless
+        let scale = (speed_sq > max_speed_sq) as i32 as f32;
+        let speed = (speed_sq + 1e-6).sqrt();
+        let factor = 1.0 - scale + scale * (config.max_speed / speed);
 
         field.vel_x[i] = vx * factor;
         field.vel_y[i] = vy * factor;
