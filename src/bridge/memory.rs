@@ -15,12 +15,15 @@ use crate::telemetry::Telemetry;
 /// Represents the shared internal state of the simulation.
 /// Wrapped in Arc<RwLock> to allow async tasks (like LLM fetch)
 /// to read the state safely without blocking rendering.
+#[cfg(not(test))] use crate::vfs::VirtualFileSystem; #[cfg(test)] use crate::vfs::VirtualFileSystem;
+
 pub struct SharedState {
     pub field: AgentField,
     pub workers: DataWorkerField,
     pub messages: MessageBus,
     pub env_grid: EnvironmentGrid,
     pub vector_mem: VectorMemory,
+    pub vfs: VirtualFileSystem,
     pub config: KernelConfig,
     pub spatial_grid: SpatialGrid,
 }
@@ -45,19 +48,33 @@ pub struct KernelBridge {
 #[wasm_bindgen]
 impl KernelBridge {
     #[wasm_bindgen(constructor)]
-    pub fn new(max_agents: usize) -> Self {
+    pub fn new(max_agents: usize, config_json: Option<String>) -> Self {
         let mut field = AgentField::new(max_agents);
         field.reserve(max_agents);
 
+        let mut config = KernelConfig::default();
+        if let Some(json) = config_json {
+            // Optional: Allows overriding quotas from JS initialization
+            // Requires serde_json struct deserialization fallback
+            // For now, if provided and matches struct shape, we could deserialize
+            // but we'll leave it as a hook. Using default if none.
+            if let Ok(parsed) = serde_json::from_str::<KernelConfig>(&json) {
+                 config = parsed;
+            }
+        }
+
         let state = SharedState {
             field,
-            workers: DataWorkerField::new(max_agents),
-            messages: MessageBus::new(1024),
+            workers: DataWorkerField::new(max_agents, config.worker_arena_bytes_per_agent * max_agents),
+            messages: MessageBus::new(1024, config.bus_arena_bytes_per_agent * max_agents),
             env_grid: EnvironmentGrid::new(100, 100, 10.0), // 100x100 grid, 10px per cell
-            vector_mem: VectorMemory::new(1024),
-            config: KernelConfig::default(),
+            vector_mem: VectorMemory::new(1024, config.vector_memory_bytes_per_capacity * 1024),
+            vfs: VirtualFileSystem::new(config.max_vfs_bytes),
             spatial_grid: SpatialGrid::new(80.0),
+            config,
         };
+
+        let config = state.config.clone();
 
         Self {
             state: Arc::new(RwLock::new(state)),
@@ -66,11 +83,11 @@ impl KernelBridge {
             render_ptr: std::ptr::null(),
             render_len: 0,
             gpu_buffer: GpuBuffer::new(max_agents),
-            script_engine: ScriptEngine::new(),
+            script_engine: ScriptEngine::new(config.max_regex_cache_items),
             prompt_builder: PromptBuilder::new(max_agents * 128), // 128 bytes roughly covers each agent printout
             use_webgl: false,
             telemetry: Telemetry::new(),
-            graph_executor: GraphExecutor::new(),
+            graph_executor: GraphExecutor::new(config.max_graph_context_bytes),
         }
     }
 
@@ -311,6 +328,7 @@ impl KernelBridge {
             vector_mem: _,
             config,
             spatial_grid,
+            ..
         } = &mut *state;
 
         // Execute pending commands

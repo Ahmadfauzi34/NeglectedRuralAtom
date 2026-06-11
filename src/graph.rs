@@ -25,9 +25,6 @@ pub struct CompiledNode {
 
 /// The Shared Context allowing Stateful Intelligence across graph nodes.
 /// Node 1 can save data here, and Node 5 can retrieve it.
-// Dynamic quota for the total length of keys stored in Graph Context (e.g. 2 MB)
-const MAX_CONTEXT_KEY_BYTES: usize = 2 * 1024 * 1024;
-
 #[derive(Clone, CustomType)]
 pub struct GraphContext {
     // We use Rhai's dynamic types to store arbitrary structured data between nodes.
@@ -35,13 +32,15 @@ pub struct GraphContext {
     // but synchronous linear execution is fine with standard ownership.
     memory: HashMap<String, Dynamic>,
     total_key_bytes: usize,
+    max_context_key_bytes: usize,
 }
 
 impl GraphContext {
-    pub fn new() -> Self {
+    pub fn new(max_context_key_bytes: usize) -> Self {
         Self {
             memory: HashMap::new(),
             total_key_bytes: 0,
+            max_context_key_bytes,
         }
     }
 
@@ -51,13 +50,13 @@ impl GraphContext {
 
     pub fn set_var(&mut self, key: &str, val: Dynamic) {
         let mut safe_key = key.to_string();
-        let structural_max_items = MAX_CONTEXT_KEY_BYTES / 128;
+        let structural_max_items = self.max_context_key_bytes / 128;
 
         let initial_old_size = self.memory.get_key_value(&safe_key).map_or(0, |(k, _)| k.len());
         let projected_size = (self.total_key_bytes - initial_old_size) + safe_key.len();
 
-        if projected_size > MAX_CONTEXT_KEY_BYTES {
-            let available = MAX_CONTEXT_KEY_BYTES.saturating_sub(self.total_key_bytes - initial_old_size);
+        if projected_size > self.max_context_key_bytes {
+            let available = self.max_context_key_bytes.saturating_sub(self.total_key_bytes - initial_old_size);
             if available == 0 {
                 return; // Context key quota completely full
             }
@@ -90,7 +89,7 @@ impl GraphContext {
 
         new_total = (new_total - actual_old_size) + safe_key.len();
 
-        if new_total > MAX_CONTEXT_KEY_BYTES {
+        if new_total > self.max_context_key_bytes {
              return; // Failsafe
         }
 
@@ -115,9 +114,9 @@ pub struct GraphExecutor {
 }
 
 impl GraphExecutor {
-    pub fn new() -> Self {
+    pub fn new(max_context_key_bytes: usize) -> Self {
         Self {
-            context: GraphContext::new(),
+            context: GraphContext::new(max_context_key_bytes),
             cached_graphs: HashMap::new(),
         }
     }

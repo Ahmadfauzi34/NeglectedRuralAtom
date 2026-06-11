@@ -31,7 +31,7 @@ pub fn json_extract_string(json_str: &str, key: &str) -> String {
 }
 
 /// Matches a regex pattern against a payload and returns the first match found.
-pub fn regex_extract(pattern: &str, text: &str) -> String {
+pub fn regex_extract(pattern: &str, text: &str, max_cache_items: usize) -> String {
     let mut safe_pattern = pattern;
     if safe_pattern.len() > 256 {
         let mut end = 256;
@@ -45,7 +45,7 @@ pub fn regex_extract(pattern: &str, text: &str) -> String {
         let mut cache = cache_ref.borrow_mut();
         if !cache.contains_key(safe_pattern) {
             // Anti-memory-leak: Clear cache if LLM generates too many unique regex patterns
-            if cache.len() >= 128 {
+            if cache.len() >= max_cache_items {
                 cache.clear();
             }
             if let Ok(re) = Regex::new(safe_pattern) {
@@ -62,7 +62,7 @@ pub fn regex_extract(pattern: &str, text: &str) -> String {
 }
 
 /// Matches a regex pattern against a payload and returns all matches as a Rhai Array.
-pub fn regex_extract_all(pattern: &str, text: &str) -> Array {
+pub fn regex_extract_all(pattern: &str, text: &str, max_cache_items: usize) -> Array {
     let mut safe_pattern = pattern;
     if safe_pattern.len() > 256 {
         let mut end = 256;
@@ -76,7 +76,7 @@ pub fn regex_extract_all(pattern: &str, text: &str) -> Array {
         let mut cache = cache_ref.borrow_mut();
         if !cache.contains_key(safe_pattern) {
             // Anti-memory-leak: Clear cache if LLM generates too many unique regex patterns
-            if cache.len() >= 128 {
+            if cache.len() >= max_cache_items {
                 cache.clear();
             }
             if let Ok(re) = Regex::new(safe_pattern) {

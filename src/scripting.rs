@@ -13,6 +13,7 @@ use rhai::{Array, CustomType, Dynamic, Engine, Scope};
 /// Safe sandboxed environment to evaluate dynamic scripts (e.g. from LLM).
 pub struct ScriptEngine {
     pub engine: Engine,
+    pub max_regex_cache_items: usize,
 }
 
 /// A wrapper pointer context to allow Rhai to safely manipulate the SOA AgentField.
@@ -371,7 +372,7 @@ impl VectorMemoryContext {
 }
 
 impl ScriptEngine {
-    pub fn new() -> Self {
+    pub fn new(max_regex_cache_items: usize) -> Self {
         let mut engine = Engine::new();
 
         // --- HARDCODE / PRE-REGISTER APIS FOR LLM TO USE ---
@@ -589,8 +590,12 @@ impl ScriptEngine {
 
         // --- BUSINESS ANALYTICS APIS FOR RHAI ---
         engine.register_fn("json_extract_string", business::json_extract_string);
-        engine.register_fn("regex_extract", business::regex_extract);
-        engine.register_fn("regex_extract_all", business::regex_extract_all);
+        engine.register_fn("regex_extract", move |pattern: rhai::ImmutableString, text: rhai::ImmutableString| -> String {
+            business::regex_extract(&pattern, &text, max_regex_cache_items)
+        });
+        engine.register_fn("regex_extract_all", move |pattern: rhai::ImmutableString, text: rhai::ImmutableString| -> rhai::Array {
+            business::regex_extract_all(&pattern, &text, max_regex_cache_items)
+        });
         engine.register_fn("sum_number_strings", business::sum_number_strings);
         engine.register_fn("multiply_matrix_1d", business::multiply_matrix_1d);
         engine.register_fn("dot_product", business::dot_product);
@@ -709,7 +714,7 @@ impl ScriptEngine {
         engine.set_max_operations(1_000_000); // Expanded to allow deep learning/while loops before aborting
         engine.set_max_string_size(50_000); // Prevent memory exhaustion
 
-        Self { engine }
+        Self { engine, max_regex_cache_items }
     }
 
     /// Evaluates a Rhai script string and returns the resulting String.

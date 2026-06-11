@@ -25,7 +25,7 @@ pub struct VectorMemory {
 }
 
 impl VectorMemory {
-    pub fn new(capacity: usize) -> Self {
+    pub fn new(capacity: usize, max_id_bytes: usize) -> Self {
         Self {
             memory_ids: Vec::with_capacity(capacity),
             vectors: Vec::with_capacity(capacity * EMBEDDING_DIM),
@@ -33,9 +33,7 @@ impl VectorMemory {
             len: 0,
             max_capacity: capacity,
             total_id_bytes: 0,
-            // Dynamic capacity pool (e.g. max_capacity * 1024 bytes) allows large textual payloads
-            // as long as the global quota is not reached.
-            max_id_bytes: capacity * 1024,
+            max_id_bytes,
         }
     }
 

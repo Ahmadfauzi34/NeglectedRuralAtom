@@ -2,7 +2,7 @@ use agentic_kernel::vfs::VirtualFileSystem;
 
 #[test]
 fn test_virtual_file_system_operations() {
-    let mut vfs = VirtualFileSystem::new();
+    let mut vfs = VirtualFileSystem::new(64 * 1024 * 1024);
 
     // 1. Write and read file
     vfs.write_file("data/config.json", "{\"setting\": true}");

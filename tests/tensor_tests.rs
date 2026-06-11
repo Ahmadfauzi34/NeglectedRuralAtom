@@ -2,7 +2,7 @@ use agentic_kernel::KernelBridge;
 
 #[test]
 fn test_asymmetric_trm_components() {
-    let mut kernel = KernelBridge::new(10);
+    let mut kernel = KernelBridge::new(10, None);
 
     // Oh, Rhai parser doesn't accept "1_i64". You just write "1".
     // The previous error "Syntax error: Expecting ; to terminate this statement" on `let mut spectral = spectral_core(16, 4)` is NOT about `16_i64`, it is about `let mut spectral`.

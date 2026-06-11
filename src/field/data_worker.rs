@@ -32,7 +32,7 @@ pub struct DataWorkerField {
 }
 
 impl DataWorkerField {
-    pub fn new(capacity: usize) -> Self {
+    pub fn new(capacity: usize, max_arena_bytes: usize) -> Self {
         // Initialize free_slots in reverse order (LIFO stack pop from end)
         let mut free_slots = Vec::with_capacity(capacity);
         for i in (0..capacity).rev() {
@@ -51,9 +51,7 @@ impl DataWorkerField {
             free_slots,
             len: 0,
             capacity,
-            // Dynamic capacity based on worker count limit.
-            // Ex: 10,000 workers * 4KB = ~40MB dynamic quota.
-            max_arena_bytes: capacity * 4096,
+            max_arena_bytes,
         }
     }
 

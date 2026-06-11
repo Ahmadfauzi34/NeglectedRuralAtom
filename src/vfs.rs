@@ -1,21 +1,29 @@
 use std::collections::HashMap;
 use regex::Regex;
 
-// Maximum total capacity for the Virtual File System (e.g. 64 MB)
-// This allows dynamic files (some very large, some very small) without arbitrary file count limits.
-const MAX_VFS_CAPACITY_BYTES: usize = 64 * 1024 * 1024;
-
-#[derive(Default, Debug, Clone)]
+#[derive(Debug, Clone)]
 pub struct VirtualFileSystem {
     pub files: HashMap<String, String>,
     pub total_bytes: usize,
+    pub max_capacity_bytes: usize,
 }
 
-impl VirtualFileSystem {
-    pub fn new() -> Self {
+impl Default for VirtualFileSystem {
+    fn default() -> Self {
         Self {
             files: HashMap::new(),
             total_bytes: 0,
+            max_capacity_bytes: 64 * 1024 * 1024, // 64 MB fallback
+        }
+    }
+}
+
+impl VirtualFileSystem {
+    pub fn new(max_capacity_bytes: usize) -> Self {
+        Self {
+            files: HashMap::new(),
+            total_bytes: 0,
+            max_capacity_bytes,
         }
     }
 
@@ -31,7 +39,7 @@ impl VirtualFileSystem {
 
         // Anti-memory-leak: Prevent unbound HashMap structural growth.
         // A dynamic structural limit based on total bytes (assume avg 4KB per file + 128 keys)
-        let max_structural_files = MAX_VFS_CAPACITY_BYTES / 4096;
+        let max_structural_files = self.max_capacity_bytes / 4096;
         if self.files.len() >= max_structural_files && !self.files.contains_key(&safe_path) {
             return;
         }
@@ -43,9 +51,9 @@ impl VirtualFileSystem {
         let projected_total = (self.total_bytes - old_size) + new_size;
 
         // Anti-memory-leak: Cap global VFS size dynamically
-        if projected_total > MAX_VFS_CAPACITY_BYTES {
+        if projected_total > self.max_capacity_bytes {
             // If it exceeds global quota, we try to fit as much as we safely can
-            let available_space = MAX_VFS_CAPACITY_BYTES.saturating_sub(self.total_bytes - old_size);
+            let available_space = self.max_capacity_bytes.saturating_sub(self.total_bytes - old_size);
             if available_space == 0 {
                 return; // No space left
             }
@@ -82,7 +90,7 @@ impl VirtualFileSystem {
         }
 
         // Anti-memory-leak: Prevent unbound HashMap structural growth.
-        let max_structural_files = MAX_VFS_CAPACITY_BYTES / 4096;
+        let max_structural_files = self.max_capacity_bytes / 4096;
         if self.files.len() >= max_structural_files && !self.files.contains_key(&safe_path) {
             return;
         }
@@ -90,8 +98,8 @@ impl VirtualFileSystem {
         let projected_total = self.total_bytes + append_content.len();
 
         // Anti-memory-leak: Cap global VFS size dynamically on append
-        let content_to_append = if projected_total > MAX_VFS_CAPACITY_BYTES {
-            let available_space = MAX_VFS_CAPACITY_BYTES.saturating_sub(self.total_bytes);
+        let content_to_append = if projected_total > self.max_capacity_bytes {
+            let available_space = self.max_capacity_bytes.saturating_sub(self.total_bytes);
             if available_space == 0 {
                 return;
             }

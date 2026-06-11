@@ -2,7 +2,7 @@ use agentic_kernel::KernelBridge;
 
 #[test]
 fn test_agent_autonomy_q_learning() {
-    let mut kernel = KernelBridge::new(10);
+    let mut kernel = KernelBridge::new(10, None);
 
     // Call the spawn method that works without JsValue easily
     // We can just use rhai to spawn it via KernelBridge eval
@@ -39,7 +39,7 @@ fn test_agent_autonomy_q_learning() {
 
 #[test]
 fn test_agent_autonomy_neural_forward_pass() {
-    let mut kernel = KernelBridge::new(10);
+    let mut kernel = KernelBridge::new(10, None);
 
     let script = r#"
         let inputs = [0.5, 0.8, -0.2];

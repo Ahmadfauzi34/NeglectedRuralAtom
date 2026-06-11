@@ -61,3 +61,4 @@ pub use render::{
     CanvasEncoder, DrawCmd, DrawHeader, TAG_CIRCLE, TAG_LINE, TAG_POLY, TAG_RECT, TAG_TEXT,
 };
 pub mod vfs;
+use crate::vfs::VirtualFileSystem;
