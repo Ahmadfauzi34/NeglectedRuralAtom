@@ -21,6 +21,8 @@ mod graph;
 mod prompt;
 #[path = "../src/render/mod.rs"]
 mod render;
+#[path = "../src/vfs.rs"]
+mod vfs;
 #[path = "../src/scripting.rs"]
 mod scripting;
 #[path = "../src/svg_generator.rs"]

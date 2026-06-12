@@ -15,7 +15,8 @@ use crate::telemetry::Telemetry;
 /// Represents the shared internal state of the simulation.
 /// Wrapped in Arc<RwLock> to allow async tasks (like LLM fetch)
 /// to read the state safely without blocking rendering.
-#[cfg(not(test))] use crate::vfs::VirtualFileSystem; #[cfg(test)] use crate::vfs::VirtualFileSystem;
+
+use crate::vfs::VirtualFileSystem;
 
 pub struct SharedState {
     pub field: AgentField,
