@@ -28,7 +28,7 @@ pub struct DataWorkerField {
     pub(crate) free_slots: Vec<usize>,
     pub(crate) len: usize,
     capacity: usize,
-    max_arena_bytes: usize,
+    pub(crate) max_arena_bytes: usize,
 }
 
 impl DataWorkerField {

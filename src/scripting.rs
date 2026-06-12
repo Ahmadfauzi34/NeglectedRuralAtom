@@ -9,11 +9,13 @@ use crate::render::CanvasEncoder;
 use crate::svg_generator::SvgGenerator;
 use crate::telemetry::EngineMetrics;
 use rhai::{Array, CustomType, Dynamic, Engine, Scope};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 
 /// Safe sandboxed environment to evaluate dynamic scripts (e.g. from LLM).
 pub struct ScriptEngine {
     pub engine: Engine,
-    pub max_regex_cache_items: usize,
+    pub max_regex_cache_items: Arc<AtomicUsize>,
 }
 
 /// A wrapper pointer context to allow Rhai to safely manipulate the SOA AgentField.
@@ -372,8 +374,15 @@ impl VectorMemoryContext {
 }
 
 impl ScriptEngine {
+    pub fn update_max_regex_cache_items(&mut self, new_val: usize) {
+        self.max_regex_cache_items.store(new_val, Ordering::Relaxed);
+    }
+
     pub fn new(max_regex_cache_items: usize) -> Self {
         let mut engine = Engine::new();
+        let cache_limit = Arc::new(AtomicUsize::new(max_regex_cache_items));
+        let cache_limit_clone1 = cache_limit.clone();
+        let cache_limit_clone2 = cache_limit.clone();
 
         // --- HARDCODE / PRE-REGISTER APIS FOR LLM TO USE ---
 
@@ -591,10 +600,12 @@ impl ScriptEngine {
         // --- BUSINESS ANALYTICS APIS FOR RHAI ---
         engine.register_fn("json_extract_string", business::json_extract_string);
         engine.register_fn("regex_extract", move |pattern: rhai::ImmutableString, text: rhai::ImmutableString| -> String {
-            business::regex_extract(&pattern, &text, max_regex_cache_items)
+            let limit = cache_limit_clone1.load(Ordering::Relaxed);
+            business::regex_extract(&pattern, &text, limit)
         });
         engine.register_fn("regex_extract_all", move |pattern: rhai::ImmutableString, text: rhai::ImmutableString| -> rhai::Array {
-            business::regex_extract_all(&pattern, &text, max_regex_cache_items)
+            let limit = cache_limit_clone2.load(Ordering::Relaxed);
+            business::regex_extract_all(&pattern, &text, limit)
         });
         engine.register_fn("sum_number_strings", business::sum_number_strings);
         engine.register_fn("multiply_matrix_1d", business::multiply_matrix_1d);
@@ -714,7 +725,7 @@ impl ScriptEngine {
         engine.set_max_operations(1_000_000); // Expanded to allow deep learning/while loops before aborting
         engine.set_max_string_size(50_000); // Prevent memory exhaustion
 
-        Self { engine, max_regex_cache_items }
+        Self { engine, max_regex_cache_items: cache_limit }
     }
 
     /// Evaluates a Rhai script string and returns the resulting String.

@@ -92,6 +92,42 @@ impl KernelBridge {
         }
     }
 
+
+    /// Dynamically updates the kernel configuration parameters at runtime via JSON.
+    /// This uses partial merging: any fields not specified in the JSON will retain their current values.
+    pub fn update_config_json(&mut self, config_json: &str) {
+        if let Ok(mut state) = self.state.write() {
+            // First, attempt to parse the incoming JSON as a generic Value object
+            if let Ok(json_val) = serde_json::from_str::<serde_json::Value>(config_json) {
+                // We serialize the current active config into a Value to perform a merge
+                if let Ok(mut current_val) = serde_json::to_value(&state.config) {
+                    // Merge incoming fields into the current configuration
+                    if let (Some(current_obj), Some(incoming_obj)) = (current_val.as_object_mut(), json_val.as_object()) {
+                        for (k, v) in incoming_obj {
+                            current_obj.insert(k.clone(), v.clone());
+                        }
+                    }
+                    // Attempt to deserialize back to our strict KernelConfig struct
+                    if let Ok(merged_config) = serde_json::from_value::<KernelConfig>(current_val) {
+                        state.config = merged_config;
+
+                        // Propagate limits
+                        state.vfs.max_capacity_bytes = merged_config.max_vfs_bytes;
+                        state.workers.max_arena_bytes = merged_config.worker_arena_bytes_per_agent * state.field.capacity;
+                        state.messages.max_arena_bytes = merged_config.bus_arena_bytes_per_agent * state.field.capacity;
+                        state.vector_mem.max_id_bytes = merged_config.vector_memory_bytes_per_capacity * state.vector_mem.max_capacity;
+                    }
+                }
+            }
+        }
+
+        // Also update components owned by KernelBridge outside of SharedState
+        if let Ok(state) = self.state.read() {
+             self.graph_executor.update_max_context_key_bytes(state.config.max_graph_context_bytes);
+             self.script_engine.update_max_regex_cache_items(state.config.max_regex_cache_items);
+        }
+    }
+
     pub fn execute_command(&mut self, json: &str) {
         if let Err(e) = self.cmd_bus.parse(json) {
             web_sys::console::error_1(&format!("Command parse error: {:?}", e).into());

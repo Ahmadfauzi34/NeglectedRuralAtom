@@ -44,6 +44,11 @@ impl GraphContext {
         }
     }
 
+
+    pub fn update_max_context_key_bytes(&mut self, max_bytes: usize) {
+        self.max_context_key_bytes = max_bytes;
+    }
+
     pub fn get_var(&mut self, key: &str) -> Dynamic {
         self.memory.get(key).cloned().unwrap_or(Dynamic::UNIT)
     }
@@ -114,6 +119,10 @@ pub struct GraphExecutor {
 }
 
 impl GraphExecutor {
+    pub fn update_max_context_key_bytes(&mut self, max_bytes: usize) {
+        self.context.update_max_context_key_bytes(max_bytes);
+    }
+
     pub fn new(max_context_key_bytes: usize) -> Self {
         Self {
             context: GraphContext::new(max_context_key_bytes),
