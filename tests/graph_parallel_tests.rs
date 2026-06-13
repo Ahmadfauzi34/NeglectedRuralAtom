@@ -3,7 +3,7 @@ use rhai::{Engine, Scope};
 
 #[test]
 fn test_parallel_graph_execution() {
-    let mut executor = GraphExecutor::new();
+    let mut executor = GraphExecutor::new(2 * 1024 * 1024);
     let mut engine = Engine::new();
 
     // We must register the methods for GraphContext manually for testing since KernelBridge does it normally.

@@ -2,7 +2,7 @@ use agentic_kernel::KernelBridge;
 
 #[test]
 fn test_autonomous_while_loop_context_evolution() {
-    let mut kernel = KernelBridge::new(10);
+    let mut kernel = KernelBridge::new(10, None);
 
     // Orthogonal projection doesn't strictly converge to `broader_context` directly,
     // it converges the projection space.

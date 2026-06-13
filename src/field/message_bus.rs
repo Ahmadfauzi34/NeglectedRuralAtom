@@ -22,7 +22,7 @@ pub struct MessageBus {
 }
 
 impl MessageBus {
-    pub fn new(initial_capacity: usize) -> Self {
+    pub fn new(initial_capacity: usize, max_arena_bytes: usize) -> Self {
         Self {
             sender_ids: Vec::with_capacity(initial_capacity),
             receiver_ids: Vec::with_capacity(initial_capacity),
@@ -31,9 +31,7 @@ impl MessageBus {
             payload_slices: Vec::with_capacity(initial_capacity),
             receiver_index: HashMap::with_capacity(initial_capacity),
             len: 0,
-            // Dynamic capacity based on initial setup.
-            // Ensures messages can scale linearly with agents, while bounding runaway loops.
-            max_arena_bytes: initial_capacity * 2048,
+            max_arena_bytes,
         }
     }
 

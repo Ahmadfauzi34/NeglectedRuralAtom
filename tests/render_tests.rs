@@ -2,7 +2,7 @@ use agentic_kernel::KernelBridge;
 
 #[test]
 fn test_generalized_rendering_via_rhai() {
-    let mut kernel = KernelBridge::new(10);
+    let mut kernel = KernelBridge::new(10, None);
 
     // Test the logic using the object syntax for custom types.
     // In Rhai, the context was pushed as "canvas". So it's `canvas.canvas_clear()` or `canvas.clear()`

@@ -21,6 +21,8 @@ mod graph;
 mod prompt;
 #[path = "../src/render/mod.rs"]
 mod render;
+#[path = "../src/vfs.rs"]
+mod vfs;
 #[path = "../src/scripting.rs"]
 mod scripting;
 #[path = "../src/svg_generator.rs"]
@@ -55,7 +57,7 @@ fn test_physics_hot_loop() {
 
 #[test]
 fn test_data_worker_arena_compaction() {
-    let mut workers = DataWorkerField::new(50_000);
+    let mut workers = DataWorkerField::new(50_000, 50_000 * 4096);
 
     // Spawn 50k workers
     for i in 0..50_000 {
@@ -93,7 +95,7 @@ fn test_data_worker_arena_compaction() {
 
 #[test]
 fn test_rhai_bounds_checking_safety() {
-    let mut bridge = KernelBridge::new(100);
+    let mut bridge = KernelBridge::new(100, None);
 
     // Spawn a few agents to have some valid bounds
     bridge.spawn(10.0, 20.0, 100.0);

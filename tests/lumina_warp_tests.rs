@@ -2,7 +2,7 @@ use agentic_kernel::KernelBridge;
 
 #[test]
 fn test_lumina_precision_warp_field() {
-    let mut kernel = KernelBridge::new(10);
+    let mut kernel = KernelBridge::new(10, None);
 
     let script_spawn = r#"
         let id = field.agent_spawn(0.0, 0.0, 100.0);

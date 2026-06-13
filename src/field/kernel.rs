@@ -4,7 +4,10 @@ use super::spatial_grid::SpatialGrid;
 
 /// Config untuk kernel — internal Rust, tidak di-expose ke JS
 /// (parameter di-pass via primitive di KernelBridge::set_config)
-#[derive(Clone, Copy)]
+use serde::{Deserialize, Serialize};
+
+#[derive(Clone, Copy, Serialize, Deserialize)]
+#[serde(default)]
 pub struct KernelConfig {
     pub dt: f32,
     pub friction: f32,
@@ -16,6 +19,14 @@ pub struct KernelConfig {
     pub cursor_x: f32,
     pub cursor_y: f32,
     pub cursor_weight: f32,
+
+    // Dynamic Global Quotas for Memory Leaks and Safety
+    pub max_vfs_bytes: usize,
+    pub max_graph_context_bytes: usize,
+    pub max_regex_cache_items: usize,
+    pub worker_arena_bytes_per_agent: usize,
+    pub bus_arena_bytes_per_agent: usize,
+    pub vector_memory_bytes_per_capacity: usize,
 }
 
 impl Default for KernelConfig {
@@ -31,6 +42,13 @@ impl Default for KernelConfig {
             cursor_x: 0.0,
             cursor_y: 0.0,
             cursor_weight: 0.0,
+            // Defaults to the original robust limits
+            max_vfs_bytes: 64 * 1024 * 1024,          // 64 MB
+            max_graph_context_bytes: 2 * 1024 * 1024, // 2 MB
+            max_regex_cache_items: 128,
+            worker_arena_bytes_per_agent: 4096,       // 4 KB * agents
+            bus_arena_bytes_per_agent: 2048,          // 2 KB * agents
+            vector_memory_bytes_per_capacity: 1024,   // 1 KB * capacity
         }
     }
 }
