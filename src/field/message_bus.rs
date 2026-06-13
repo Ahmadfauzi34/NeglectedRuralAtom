@@ -35,7 +35,7 @@ impl MessageBus {
         }
     }
 
-    /// Sends a message from one agent to another (or broadcast if receiver_id == BROADCAST_ID).
+    /// Sends a message from one agent to another (or broadcast if `receiver_id` == `BROADCAST_ID`).
     pub fn send_message(&mut self, sender_id: u32, receiver_id: u32, msg_type: u8, payload: &str) {
         // Anti-memory-leak: Prevent unbounded vector structural growth.
         // Max messages dynamically linked to arena bytes (assuming avg ~32 bytes per message)
@@ -50,7 +50,7 @@ impl MessageBus {
         // Drops message entirely if 0 bytes available, else gracefully truncates.
         if self.text_arena.len() + safe_payload.len() > self.max_arena_bytes {
             let available = self.max_arena_bytes.saturating_sub(self.text_arena.len());
-            if available == 0 && payload.len() > 0 {
+            if available == 0 && !payload.is_empty() {
                 return; // Dropped to prevent memory ballooning
             }
             let mut end = available;
@@ -77,7 +77,7 @@ impl MessageBus {
         // Populate fast lookup index
         self.receiver_index
             .entry(receiver_id)
-            .or_insert_with(Vec::new)
+            .or_default()
             .push(current_idx);
 
         self.len += 1;

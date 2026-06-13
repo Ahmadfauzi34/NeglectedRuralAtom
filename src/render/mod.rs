@@ -118,14 +118,14 @@ impl CanvasEncoder {
 
         unsafe {
             let h = std::slice::from_raw_parts(
-                &header as *const _ as *const u8,
+                (&raw const header).cast::<u8>(),
                 std::mem::size_of::<DrawHeader>(),
             );
             self.flat.extend_from_slice(h);
 
             if !self.cmds.is_empty() {
                 let c = std::slice::from_raw_parts(
-                    self.cmds.as_ptr() as *const u8,
+                    self.cmds.as_ptr().cast::<u8>(),
                     self.cmds.len() * std::mem::size_of::<DrawCmd>(),
                 );
                 self.flat.extend_from_slice(c);

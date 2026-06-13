@@ -44,7 +44,6 @@ impl GraphContext {
         }
     }
 
-
     pub fn update_max_context_key_bytes(&mut self, max_bytes: usize) {
         self.max_context_key_bytes = max_bytes;
     }
@@ -57,11 +56,16 @@ impl GraphContext {
         let mut safe_key = key.to_string();
         let structural_max_items = self.max_context_key_bytes / 128;
 
-        let initial_old_size = self.memory.get_key_value(&safe_key).map_or(0, |(k, _)| k.len());
+        let initial_old_size = self
+            .memory
+            .get_key_value(&safe_key)
+            .map_or(0, |(k, _)| k.len());
         let projected_size = (self.total_key_bytes - initial_old_size) + safe_key.len();
 
         if projected_size > self.max_context_key_bytes {
-            let available = self.max_context_key_bytes.saturating_sub(self.total_key_bytes - initial_old_size);
+            let available = self
+                .max_context_key_bytes
+                .saturating_sub(self.total_key_bytes - initial_old_size);
             if available == 0 {
                 return; // Context key quota completely full
             }
@@ -81,7 +85,10 @@ impl GraphContext {
 
         // Re-evaluate old_size because safe_key might have been truncated and could now
         // match a different existing key in the HashMap.
-        let actual_old_size = self.memory.get_key_value(&safe_key).map_or(0, |(k, _)| k.len());
+        let actual_old_size = self
+            .memory
+            .get_key_value(&safe_key)
+            .map_or(0, |(k, _)| k.len());
 
         // Prevent double accounting if the truncated key matches an existing one.
         // We only add the length of the new key, and subtract the length of the key it overwrites.
@@ -95,7 +102,7 @@ impl GraphContext {
         new_total = (new_total - actual_old_size) + safe_key.len();
 
         if new_total > self.max_context_key_bytes {
-             return; // Failsafe
+            return; // Failsafe
         }
 
         self.total_key_bytes = new_total;

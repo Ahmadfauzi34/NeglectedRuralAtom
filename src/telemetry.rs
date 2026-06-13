@@ -27,6 +27,12 @@ pub struct Telemetry {
     last_frame_time: f64,
 }
 
+impl Default for Telemetry {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Telemetry {
     pub fn new() -> Self {
         Self {

@@ -28,8 +28,7 @@ impl PromptBuilder {
         for &(id, px, py, vx, vy, health) in snapshot {
             let _ = writeln!(
                 &mut self.buffer,
-                "Agent ID {}: pos(x:{:.1}, y:{:.1}), vel(vx:{:.2}, vy:{:.2}), health: {:.1}",
-                id, px, py, vx, vy, health
+                "Agent ID {id}: pos(x:{px:.1}, y:{py:.1}), vel(vx:{vx:.2}, vy:{vy:.2}), health: {health:.1}"
             );
         }
 

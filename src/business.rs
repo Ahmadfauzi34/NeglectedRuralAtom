@@ -12,7 +12,7 @@ thread_local! {
 /// Returns an empty string if the key doesn't exist or parsing fails.
 /// This relies on a fast string search instead of parsing the entire DOM to avoid heavy allocations.
 pub fn json_extract_string(json_str: &str, key: &str) -> String {
-    let search_key = format!("\"{}\":", key);
+    let search_key = format!("\"{key}\":");
     if let Some(start_idx) = json_str.find(&search_key) {
         let value_start = start_idx + search_key.len();
         let slice = &json_str[value_start..];
@@ -23,7 +23,7 @@ pub fn json_extract_string(json_str: &str, key: &str) -> String {
             if let Some(end_idx) = trimmed[1..].find('"') {
                 return trimmed[1..=end_idx].to_string();
             }
-        } else if let Some(end_idx) = trimmed.find(|c| c == ',' || c == '}') {
+        } else if let Some(end_idx) = trimmed.find([',', '}']) {
             return trimmed[..end_idx].trim().to_string();
         }
     }
@@ -94,12 +94,12 @@ pub fn regex_extract_all(pattern: &str, text: &str, max_cache_items: usize) -> A
 }
 
 /// Aggregates multiple number strings into a sum.
-/// Useful for quick MapReduce math operations from a payload array.
+/// Useful for quick `MapReduce` math operations from a payload array.
 pub fn sum_number_strings(arr: Array) -> f64 {
     let mut sum = 0.0;
     for item in arr {
         if let Ok(f) = item.as_float() {
-            sum += f as f64;
+            sum += f;
         } else if let Ok(i) = item.as_int() {
             sum += i as f64;
         } else if let Ok(s) = item.into_string() {
@@ -148,7 +148,7 @@ pub fn multiply_matrix_1d(arr_a: Array, arr_b: Array) -> Array {
 
     let mut out = rhai::Array::new();
     for val in result {
-        out.push((val as f64).into());
+        out.push(f64::from(val).into());
     }
 
     out
@@ -186,7 +186,7 @@ pub fn sigmoid(x: f64) -> f64 {
 }
 
 /// Updates a Q-Learning Table value using the Bellman Equation directly in Rust WASM.
-/// q_current = q_current + learning_rate * (reward + discount_factor * max_future_q - q_current)
+/// `q_current` = `q_current` + `learning_rate` * (reward + `discount_factor` * `max_future_q` - `q_current`)
 pub fn q_learning_update(
     q_current: f64,
     reward: f64,
@@ -210,7 +210,7 @@ pub fn context_evolution(
 
     for item in agent_context {
         if let Ok(f) = item.as_float() {
-            vec_a.push(f as f64);
+            vec_a.push(f);
         } else if let Ok(i) = item.as_int() {
             vec_a.push(i as f64);
         } else {
@@ -220,7 +220,7 @@ pub fn context_evolution(
 
     for item in broader_context {
         if let Ok(f) = item.as_float() {
-            vec_b.push(f as f64);
+            vec_b.push(f);
         } else if let Ok(i) = item.as_int() {
             vec_b.push(i as f64);
         } else {

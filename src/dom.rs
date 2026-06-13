@@ -23,7 +23,7 @@ impl DomContext {
         if let Some(el) = self.document.get_element_by_id(target_id) {
             Ok(el.inner_html())
         } else {
-            Err(format!("Element with id '{}' not found", target_id))
+            Err(format!("Element with id '{target_id}' not found"))
         }
     }
 
@@ -42,10 +42,10 @@ impl DomContext {
     ) -> Result<(), String> {
         if let Some(el) = self.document.get_element_by_id(target_id) {
             el.insert_adjacent_html(position, html)
-                .map_err(|_| format!("Failed to insert HTML at position '{}'", position))?;
+                .map_err(|_| format!("Failed to insert HTML at position '{position}'"))?;
             Ok(())
         } else {
-            Err(format!("Element with id '{}' not found", target_id))
+            Err(format!("Element with id '{target_id}' not found"))
         }
     }
 
@@ -67,7 +67,7 @@ impl DomContext {
                 Ok(false)
             }
         } else {
-            Err(format!("Element with id '{}' not found", target_id))
+            Err(format!("Element with id '{target_id}' not found"))
         }
     }
 
@@ -77,7 +77,7 @@ impl DomContext {
             el.set_inner_html(html);
             Ok(())
         } else {
-            Err(format!("Element with id '{}' not found", target_id))
+            Err(format!("Element with id '{target_id}' not found"))
         }
     }
 
@@ -87,7 +87,7 @@ impl DomContext {
             el.set_text_content(Some(text));
             Ok(())
         } else {
-            Err(format!("Element with id '{}' not found", target_id))
+            Err(format!("Element with id '{target_id}' not found"))
         }
     }
 
@@ -98,13 +98,13 @@ impl DomContext {
                 html_el
                     .style()
                     .set_property(property, value)
-                    .map_err(|_| format!("Failed to set style property '{}'", property))?;
+                    .map_err(|_| format!("Failed to set style property '{property}'"))?;
                 Ok(())
             } else {
-                Err(format!("Element '{}' is not an HtmlElement", target_id))
+                Err(format!("Element '{target_id}' is not an HtmlElement"))
             }
         } else {
-            Err(format!("Element with id '{}' not found", target_id))
+            Err(format!("Element with id '{target_id}' not found"))
         }
     }
 
@@ -114,13 +114,10 @@ impl DomContext {
             if let Ok(input_el) = el.dyn_into::<HtmlInputElement>() {
                 Ok(input_el.value())
             } else {
-                Err(format!(
-                    "Element '{}' is not an HtmlInputElement",
-                    target_id
-                ))
+                Err(format!("Element '{target_id}' is not an HtmlInputElement"))
             }
         } else {
-            Err(format!("Element with id '{}' not found", target_id))
+            Err(format!("Element with id '{target_id}' not found"))
         }
     }
 
@@ -145,9 +142,9 @@ impl DomContext {
                     }
                 }
             }
-            Err(format!("Element '{}' is not a valid Canvas 2D", target_id))
+            Err(format!("Element '{target_id}' is not a valid Canvas 2D"))
         } else {
-            Err(format!("Element with id '{}' not found", target_id))
+            Err(format!("Element with id '{target_id}' not found"))
         }
     }
 
@@ -169,9 +166,9 @@ impl DomContext {
                     }
                 }
             }
-            Err(format!("Element '{}' is not a valid Canvas 2D", target_id))
+            Err(format!("Element '{target_id}' is not a valid Canvas 2D"))
         } else {
-            Err(format!("Element with id '{}' not found", target_id))
+            Err(format!("Element with id '{target_id}' not found"))
         }
     }
 
@@ -198,9 +195,9 @@ impl DomContext {
                     }
                 }
             }
-            Err(format!("Element '{}' is not a valid Canvas 2D", target_id))
+            Err(format!("Element '{target_id}' is not a valid Canvas 2D"))
         } else {
-            Err(format!("Element with id '{}' not found", target_id))
+            Err(format!("Element with id '{target_id}' not found"))
         }
     }
 }

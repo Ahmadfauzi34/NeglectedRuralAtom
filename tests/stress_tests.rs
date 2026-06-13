@@ -21,14 +21,14 @@ mod graph;
 mod prompt;
 #[path = "../src/render/mod.rs"]
 mod render;
-#[path = "../src/vfs.rs"]
-mod vfs;
-#[path = "../src/scripting.rs"]
+#[path = "../src/scripting/mod.rs"]
 mod scripting;
 #[path = "../src/svg_generator.rs"]
 mod svg_generator;
 #[path = "../src/telemetry.rs"]
 mod telemetry;
+#[path = "../src/vfs.rs"]
+mod vfs;
 
 use bridge::KernelBridge;
 

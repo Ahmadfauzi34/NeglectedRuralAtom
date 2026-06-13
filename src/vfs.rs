@@ -1,5 +1,5 @@
-use std::collections::HashMap;
 use regex::Regex;
+use std::collections::HashMap;
 
 #[derive(Debug, Clone)]
 pub struct VirtualFileSystem {
@@ -45,7 +45,10 @@ impl VirtualFileSystem {
         }
 
         // Calculate size difference if file already exists
-        let old_size = self.files.get(&safe_path).map_or(0, |s| s.len());
+        let old_size = self
+            .files
+            .get(&safe_path)
+            .map_or(0, std::string::String::len);
         let new_size = content.len();
 
         let projected_total = (self.total_bytes - old_size) + new_size;
@@ -53,7 +56,9 @@ impl VirtualFileSystem {
         // Anti-memory-leak: Cap global VFS size dynamically
         if projected_total > self.max_capacity_bytes {
             // If it exceeds global quota, we try to fit as much as we safely can
-            let available_space = self.max_capacity_bytes.saturating_sub(self.total_bytes - old_size);
+            let available_space = self
+                .max_capacity_bytes
+                .saturating_sub(self.total_bytes - old_size);
             if available_space == 0 {
                 return; // No space left
             }
@@ -120,7 +125,7 @@ impl VirtualFileSystem {
             return;
         }
 
-        let current = self.files.entry(safe_path).or_insert_with(String::new);
+        let current = self.files.entry(safe_path).or_default();
         current.push_str(content_to_append);
         self.total_bytes += content_to_append.len();
     }
