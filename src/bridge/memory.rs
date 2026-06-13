@@ -257,6 +257,45 @@ impl KernelBridge {
         result
     }
 
+    /// Evaluates a Rhai script for a specific agent utilizing the L1 Exact Cache
+    #[wasm_bindgen]
+    pub fn eval_llm_script_for_agent(&mut self, script: &str, agent_idx: usize) -> String {
+        let start_time = Telemetry::start_timer();
+
+        let Ok(mut state) = self.state.write() else {
+            return "WASM Lock Error: Cannot access state".to_string();
+        };
+        let SharedState {
+            field,
+            workers,
+            messages,
+            env_grid,
+            vector_mem,
+            config,
+            ..
+        } = &mut *state;
+
+        let metrics_copy = self.telemetry.metrics.clone();
+        let result = match self.script_engine.eval_agent(
+            script,
+            field,
+            workers,
+            messages,
+            env_grid,
+            vector_mem,
+            &mut self.encoder,
+            config,
+            metrics_copy,
+            agent_idx,
+        ) {
+            Ok(out) => out,
+            Err(err) => err,
+        };
+
+        self.telemetry.record_script_eval(start_time);
+        result
+    }
+
     /// Evaluates a JS Array representing a DAG of `ScriptNode` blocks.
     /// This brings advanced Pipeline behavior matching `ComfyUI` or `LangChain`
     /// directly to the edge inside WASM without heavy JSON parsing overhead.

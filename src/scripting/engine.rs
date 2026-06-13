@@ -779,6 +779,57 @@ impl ScriptEngine {
         }
     }
 
+    pub fn eval_agent(
+        &mut self,
+        script: &str,
+        field: &mut AgentField,
+        workers: &mut DataWorkerField,
+        messages: &mut MessageBus,
+        env_grid: &mut EnvironmentGrid,
+        vector_mem: &mut VectorMemory,
+        encoder: &mut CanvasEncoder,
+        config: &crate::field::KernelConfig,
+        metrics: EngineMetrics,
+        agent_idx: usize,
+    ) -> Result<String, String> {
+        let behavior = field.behavior_state.get(agent_idx).copied().unwrap_or(0);
+        let x = field.pos_x.get(agent_idx).copied().unwrap_or(0.0);
+        let y = field.pos_y.get(agent_idx).copied().unwrap_or(0.0);
+        let health = field.health.get(agent_idx).copied().unwrap_or(0.0);
+
+        let mut scope = Scope::new();
+
+        let f_ctx = FieldContext::new(field);
+        let w_ctx = WorkerContext::new(workers);
+        let m_ctx = MessageContext::new(messages);
+        let e_ctx = EnvironmentContext::new(env_grid);
+        let v_ctx = VectorMemoryContext::new(vector_mem);
+        let r_ctx = RenderContext::new(encoder);
+        let k_ctx = ConfigContext::new(config);
+
+        scope.push("field", f_ctx);
+        scope.push("workers", w_ctx);
+        scope.push("messages", m_ctx);
+        scope.push("env_grid", e_ctx);
+        scope.push("vector_mem", v_ctx);
+        scope.push("canvas", r_ctx);
+        scope.push("kernel", k_ctx);
+        scope.push("metrics", metrics);
+        scope.push("agent_idx", agent_idx as i64); // Provide context of who is executing
+
+        if script.is_empty() {
+            return Ok(String::new());
+        }
+
+        match self
+            .meta
+            .eval_for_agent(script, &mut scope, behavior.into(), x, y, health)
+        {
+            Ok(result) => Ok(result.to_string()),
+            Err(e) => Err(format!("LLM Agent Eval Error: {e}")),
+        }
+    }
+
     /// Evaluates a Rhai script string and returns the resulting String.
     /// Passes the contexts as dynamic variables to the script.
     pub fn eval(
