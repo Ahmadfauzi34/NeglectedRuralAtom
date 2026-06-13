@@ -40,10 +40,9 @@ pub struct KernelBridge {
     script_engine: ScriptEngine,
     prompt_builder: PromptBuilder,
     use_webgl: bool,
-    // Made internal to avoid wasm_bindgen trait issues with struct exposure.
-    // We will expose it via a getter that returns a JSON string instead.
     telemetry: Telemetry,
     graph_executor: GraphExecutor,
+    worker_callback: Option<js_sys::Function>,
 }
 
 #[wasm_bindgen]
@@ -89,6 +88,7 @@ impl KernelBridge {
             use_webgl: false,
             telemetry: Telemetry::new(),
             graph_executor: GraphExecutor::new(config.max_graph_context_bytes),
+            worker_callback: None,
         }
     }
 
@@ -125,6 +125,52 @@ impl KernelBridge {
         if let Ok(state) = self.state.read() {
              self.graph_executor.update_max_context_key_bytes(state.config.max_graph_context_bytes);
              self.script_engine.update_max_regex_cache_items(state.config.max_regex_cache_items);
+        }
+    }
+
+
+    /// Polls completed Data Worker tasks.
+    /// Registers a JS callback to be executed when Data Worker tasks complete.
+    /// This eliminates the need for continuous polling from Javascript.
+    pub fn register_worker_callback(&mut self, callback: js_sys::Function) {
+        self.worker_callback = Some(callback);
+    }
+
+    /// Internal function to check and flush completed workers, triggering the JS callback if bound.
+    /// This should be called once per physics/simulation step internally.
+    fn flush_worker_events(&mut self) {
+        let mut results = Vec::new();
+
+        if let Ok(mut state) = self.state.write() {
+            let workers = &mut state.workers;
+            for i in 0..workers.capacity {
+                if workers.active[i] == 1 && workers.states[i] == 2 { // WorkerState::Done
+                    let task_id = workers.task_ids[i];
+                    let (r_start, r_end) = workers.result_slices[i];
+
+                    let result_str = if let Some(text) = workers.text_arena.get(r_start as usize..r_end as usize) {
+                        text.to_string()
+                    } else {
+                        String::new()
+                    };
+
+                    results.push(serde_json::json!({
+                        "task_id": task_id,
+                        "result": result_str
+                    }));
+
+                    // Kill worker to free the slot immediately
+                    workers.kill_worker(i);
+                }
+            }
+        }
+
+        if !results.is_empty() {
+            if let Some(callback) = &self.worker_callback {
+                if let Ok(json_str) = serde_json::to_string(&results) {
+                    let _ = callback.call1(&JsValue::null(), &JsValue::from_str(&json_str));
+                }
+            }
         }
     }
 
@@ -341,6 +387,9 @@ impl KernelBridge {
 
     pub fn step(&mut self) {
         let start_time = Telemetry::start_timer();
+
+        // Trigger any asynchronous callbacks to JS for completed LLM tasks
+        self.flush_worker_events();
         let Ok(mut state) = self.state.write() else {
             return;
         };
