@@ -19,10 +19,10 @@ impl TensorPool {
 
     pub fn acquire(&mut self) -> Array3<f32> {
         // Pop dari pool, zero-fill tanpa alloc baru
-        self.buffers
-            .pop()
-            .map(|arc| Arc::try_unwrap(arc).unwrap_or_else(|a| (*a).clone()))
-            .unwrap_or_else(|| Array3::zeros(self.shape))
+        self.buffers.pop().map_or_else(
+            || Array3::zeros(self.shape),
+            |arc| Arc::try_unwrap(arc).unwrap_or_else(|a| (*a).clone()),
+        )
     }
 
     pub fn release(&mut self, tensor: Array3<f32>) {
@@ -54,7 +54,7 @@ fn layer_norm_inplace(out: &mut Array3<f32>, eps: f32) {
             let std = (var + eps).sqrt();
             let inv_std = 1.0 / std; // Precompute untuk branchless
 
-            for v in slice.iter_mut() {
+            for v in &mut slice {
                 *v = (*v - mean) * inv_std; // Branchless, no division in loop
             }
         }
@@ -77,7 +77,7 @@ fn rms_norm_inplace(out: &mut Array3<f32>, eps: f32) {
             let std = (var + eps).sqrt();
             let inv_std = 1.0 / std;
 
-            for v in slice.iter_mut() {
+            for v in &mut slice {
                 *v *= inv_std;
             }
         }
@@ -177,7 +177,7 @@ impl SpectralCore {
             .map(|b| b.iter().map(|&x| x * x).sum::<f32>())
             .sum();
 
-        for band in output.bands_spatial.iter_mut() {
+        for band in &mut output.bands_spatial {
             let band_energy: f32 = band.iter().map(|&x| x * x).sum();
             if (band_energy / (total_e + 1e-6)) < (threshold as f32) {
                 band.fill(0.0);
@@ -189,7 +189,12 @@ impl SpectralCore {
 }
 
 #[inline(always)]
-fn convolve_kernel_3d(_input: &Array3<f32>, _output: &mut Array3<f32>, _freq: f32, _d_model: usize) {
+fn convolve_kernel_3d(
+    _input: &Array3<f32>,
+    _output: &mut Array3<f32>,
+    _freq: f32,
+    _d_model: usize,
+) {
     // Implementasi kernel convolution tanpa closure alloc
     // Gunakan SOA-friendly indexing untuk cache locality
 }

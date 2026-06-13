@@ -45,7 +45,7 @@ impl SvgGenerator {
             let rel_x = 100.0 + ((x - center_x) * 0.5);
             let rel_y = 100.0 + ((y - center_y) * 0.5);
 
-            if rel_x >= 0.0 && rel_x <= 200.0 && rel_y >= 0.0 && rel_y <= 200.0 {
+            if (0.0..=200.0).contains(&rel_x) && (0.0..=200.0).contains(&rel_y) {
                 document = document.add(
                     Circle::new()
                         .set("cx", rel_x)
@@ -71,13 +71,10 @@ impl SvgGenerator {
             r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {width} {height}" width="100%" height="100%">
   <foreignObject x="0" y="0" width="{width}" height="{height}">
     <div xmlns="http://www.w3.org/1999/xhtml" style="width: 100%; height: 100%;">
-      {html}
+      {inner_html}
     </div>
   </foreignObject>
-</svg>"#,
-            width = width,
-            height = height,
-            html = inner_html
+</svg>"#
         )
     }
 

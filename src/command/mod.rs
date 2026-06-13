@@ -43,6 +43,12 @@ pub struct CommandBus {
     queue: Vec<Command>, // <-- FIX: hapus <
 }
 
+impl Default for CommandBus {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl CommandBus {
     pub fn new() -> Self {
         Self {

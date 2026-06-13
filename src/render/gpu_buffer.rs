@@ -4,7 +4,7 @@ use crate::field::soa::AgentField;
 /// Layout per active agent (4 floats = 16 bytes):
 /// [x, y, vx, vy]
 ///
-/// This allows JS to simply create a Float32Array view over this memory
+/// This allows JS to simply create a `Float32Array` view over this memory
 /// and bind it directly to an instanced WebGL array buffer without JS iteration.
 pub struct GpuBuffer {
     data: Vec<f32>,

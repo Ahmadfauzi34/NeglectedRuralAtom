@@ -15,7 +15,6 @@ use crate::telemetry::Telemetry;
 /// Represents the shared internal state of the simulation.
 /// Wrapped in Arc<RwLock> to allow async tasks (like LLM fetch)
 /// to read the state safely without blocking rendering.
-
 use crate::vfs::VirtualFileSystem;
 
 pub struct SharedState {
@@ -40,10 +39,9 @@ pub struct KernelBridge {
     script_engine: ScriptEngine,
     prompt_builder: PromptBuilder,
     use_webgl: bool,
-    // Made internal to avoid wasm_bindgen trait issues with struct exposure.
-    // We will expose it via a getter that returns a JSON string instead.
     telemetry: Telemetry,
     graph_executor: GraphExecutor,
+    worker_callback: Option<js_sys::Function>,
 }
 
 #[wasm_bindgen]
@@ -60,13 +58,16 @@ impl KernelBridge {
             // For now, if provided and matches struct shape, we could deserialize
             // but we'll leave it as a hook. Using default if none.
             if let Ok(parsed) = serde_json::from_str::<KernelConfig>(&json) {
-                 config = parsed;
+                config = parsed;
             }
         }
 
         let state = SharedState {
             field,
-            workers: DataWorkerField::new(max_agents, config.worker_arena_bytes_per_agent * max_agents),
+            workers: DataWorkerField::new(
+                max_agents,
+                config.worker_arena_bytes_per_agent * max_agents,
+            ),
             messages: MessageBus::new(1024, config.bus_arena_bytes_per_agent * max_agents),
             env_grid: EnvironmentGrid::new(100, 100, 10.0), // 100x100 grid, 10px per cell
             vector_mem: VectorMemory::new(1024, config.vector_memory_bytes_per_capacity * 1024),
@@ -75,7 +76,7 @@ impl KernelBridge {
             config,
         };
 
-        let config = state.config.clone();
+        let config = state.config;
 
         Self {
             state: Arc::new(RwLock::new(state)),
@@ -89,9 +90,9 @@ impl KernelBridge {
             use_webgl: false,
             telemetry: Telemetry::new(),
             graph_executor: GraphExecutor::new(config.max_graph_context_bytes),
+            worker_callback: None,
         }
     }
-
 
     /// Dynamically updates the kernel configuration parameters at runtime via JSON.
     /// This uses partial merging: any fields not specified in the JSON will retain their current values.
@@ -102,7 +103,9 @@ impl KernelBridge {
                 // We serialize the current active config into a Value to perform a merge
                 if let Ok(mut current_val) = serde_json::to_value(&state.config) {
                     // Merge incoming fields into the current configuration
-                    if let (Some(current_obj), Some(incoming_obj)) = (current_val.as_object_mut(), json_val.as_object()) {
+                    if let (Some(current_obj), Some(incoming_obj)) =
+                        (current_val.as_object_mut(), json_val.as_object())
+                    {
                         for (k, v) in incoming_obj {
                             current_obj.insert(k.clone(), v.clone());
                         }
@@ -113,9 +116,13 @@ impl KernelBridge {
 
                         // Propagate limits
                         state.vfs.max_capacity_bytes = merged_config.max_vfs_bytes;
-                        state.workers.max_arena_bytes = merged_config.worker_arena_bytes_per_agent * state.field.capacity;
-                        state.messages.max_arena_bytes = merged_config.bus_arena_bytes_per_agent * state.field.capacity;
-                        state.vector_mem.max_id_bytes = merged_config.vector_memory_bytes_per_capacity * state.vector_mem.max_capacity;
+                        state.workers.max_arena_bytes =
+                            merged_config.worker_arena_bytes_per_agent * state.field.capacity;
+                        state.messages.max_arena_bytes =
+                            merged_config.bus_arena_bytes_per_agent * state.field.capacity;
+                        state.vector_mem.max_id_bytes = merged_config
+                            .vector_memory_bytes_per_capacity
+                            * state.vector_mem.max_capacity;
                     }
                 }
             }
@@ -123,25 +130,75 @@ impl KernelBridge {
 
         // Also update components owned by KernelBridge outside of SharedState
         if let Ok(state) = self.state.read() {
-             self.graph_executor.update_max_context_key_bytes(state.config.max_graph_context_bytes);
-             self.script_engine.update_max_regex_cache_items(state.config.max_regex_cache_items);
+            self.graph_executor
+                .update_max_context_key_bytes(state.config.max_graph_context_bytes);
+            self.script_engine
+                .update_max_regex_cache_items(state.config.max_regex_cache_items);
+        }
+    }
+
+    /// Polls completed Data Worker tasks.
+    /// Registers a JS callback to be executed when Data Worker tasks complete.
+    /// This eliminates the need for continuous polling from Javascript.
+    pub fn register_worker_callback(&mut self, callback: js_sys::Function) {
+        self.worker_callback = Some(callback);
+    }
+
+    /// Internal function to check and flush completed workers, triggering the JS callback if bound.
+    /// This should be called once per physics/simulation step internally.
+    fn flush_worker_events(&mut self) {
+        let mut results = Vec::new();
+
+        if let Ok(mut state) = self.state.write() {
+            let workers = &mut state.workers;
+            for i in 0..workers.capacity {
+                if workers.active[i] == 1 && workers.states[i] == 2 {
+                    // WorkerState::Done
+                    let task_id = workers.task_ids[i];
+                    let (r_start, r_end) = workers.result_slices[i];
+
+                    let result_str = if let Some(text) =
+                        workers.text_arena.get(r_start as usize..r_end as usize)
+                    {
+                        text.to_string()
+                    } else {
+                        String::new()
+                    };
+
+                    results.push(serde_json::json!({
+                        "task_id": task_id,
+                        "result": result_str
+                    }));
+
+                    // Kill worker to free the slot immediately
+                    workers.kill_worker(i);
+                }
+            }
+        }
+
+        if !results.is_empty() {
+            if let Some(callback) = &self.worker_callback {
+                if let Ok(json_str) = serde_json::to_string(&results) {
+                    let _ = callback.call1(&JsValue::null(), &JsValue::from_str(&json_str));
+                }
+            }
         }
     }
 
     pub fn execute_command(&mut self, json: &str) {
         if let Err(e) = self.cmd_bus.parse(json) {
-            web_sys::console::error_1(&format!("Command parse error: {:?}", e).into());
+            web_sys::console::error_1(&format!("Command parse error: {e:?}").into());
         }
     }
 
     pub fn execute_batch(&mut self, json: &str) {
         if let Err(e) = self.cmd_bus.parse_batch(json) {
-            web_sys::console::error_1(&format!("Batch parse error: {:?}", e).into());
+            web_sys::console::error_1(&format!("Batch parse error: {e:?}").into());
         }
     }
 
     /// Instantly allocates and distributes tasks mapped from a JS Array of strings
-    /// across idle Data Workers. Zero-copy parsing via JsValue.
+    /// across idle Data Workers. Zero-copy parsing via `JsValue`.
     pub fn spawn_workers_batch(&mut self, base_task_id: u32, payloads_js: JsValue) -> i32 {
         if let Ok(payloads) = serde_wasm_bindgen::from_value::<Vec<String>>(payloads_js) {
             let Ok(mut state) = self.state.write() else {
@@ -179,7 +236,7 @@ impl KernelBridge {
             config,
             ..
         } = &mut *state;
-        let metrics_copy = self.telemetry.metrics.clone();
+        let metrics_copy = self.telemetry.metrics;
 
         let result = match self.script_engine.eval(
             script,
@@ -201,7 +258,7 @@ impl KernelBridge {
     }
 
     /// Evaluates a JS Array representing a DAG of `ScriptNode` blocks.
-    /// This brings advanced Pipeline behavior matching ComfyUI or LangChain
+    /// This brings advanced Pipeline behavior matching `ComfyUI` or `LangChain`
     /// directly to the edge inside WASM without heavy JSON parsing overhead.
     pub fn eval_graph(&mut self, nodes_js: JsValue, start_node_id: &str) -> String {
         let start_time = Telemetry::start_timer();
@@ -220,7 +277,7 @@ impl KernelBridge {
                     config,
                     ..
                 } = &mut *state;
-                let metrics_copy = self.telemetry.metrics.clone();
+                let metrics_copy = self.telemetry.metrics;
 
                 let mut scope = rhai::Scope::new();
                 // We utilize the ScriptEngine's existing capability to inject field bindings into a base scope
@@ -239,7 +296,7 @@ impl KernelBridge {
                     Ok(_) => {
                         // Base scope is now primed with `field`, `workers`, etc.
                         match self.graph_executor.run_graph(
-                            &self.script_engine.engine,
+                            &self.script_engine.meta.engine,
                             &mut scope,
                             nodes,
                             start_node_id,
@@ -341,6 +398,9 @@ impl KernelBridge {
 
     pub fn step(&mut self) {
         let start_time = Telemetry::start_timer();
+
+        // Trigger any asynchronous callbacks to JS for completed LLM tasks
+        self.flush_worker_events();
         let Ok(mut state) = self.state.write() else {
             return;
         };
@@ -376,6 +436,9 @@ impl KernelBridge {
 
         // Step physics and AI
         step_agents(field, config, spatial_grid, env_grid);
+
+        // Tick meta engine for AST Cache maintenance
+        self.script_engine.meta.tick();
 
         // Render pass optimization: Branch execution based on chosen target
         if self.use_webgl {
@@ -454,14 +517,14 @@ pub struct MemoryView;
 
 #[wasm_bindgen]
 impl MemoryView {
-    /// Creates a Float32Array over WASM linear memory.
+    /// Creates a `Float32Array` over WASM linear memory.
     /// # Safety
     /// The caller must ensure `ptr` is valid for `len` elements and the memory is not accessed mutably or reallocated while the view is active.
     pub fn float32_array(ptr: *const f32, len: usize) -> js_sys::Float32Array {
         unsafe { js_sys::Float32Array::view(std::slice::from_raw_parts(ptr, len)) }
     }
 
-    /// Creates a Uint8Array over WASM linear memory.
+    /// Creates a `Uint8Array` over WASM linear memory.
     /// # Safety
     /// The caller must ensure `ptr` is valid for `len` elements and the memory is not accessed mutably or reallocated while the view is active.
     pub fn uint8_array(ptr: *const u8, len: usize) -> js_sys::Uint8Array {

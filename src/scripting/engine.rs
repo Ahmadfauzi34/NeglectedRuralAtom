@@ -8,17 +8,19 @@ use crate::field::{
 use crate::render::CanvasEncoder;
 use crate::svg_generator::SvgGenerator;
 use crate::telemetry::EngineMetrics;
-use rhai::{Array, CustomType, Dynamic, Engine, Scope};
+use rhai::{Array, CustomType, Engine, Scope};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 /// Safe sandboxed environment to evaluate dynamic scripts (e.g. from LLM).
+use super::meta_optimizer::MetaScriptEngine;
+
 pub struct ScriptEngine {
-    pub engine: Engine,
+    pub meta: MetaScriptEngine,
     pub max_regex_cache_items: Arc<AtomicUsize>,
 }
 
-/// A wrapper pointer context to allow Rhai to safely manipulate the SOA AgentField.
+/// A wrapper pointer context to allow Rhai to safely manipulate the SOA `AgentField`.
 /// Using raw pointer here because Rhai requires types to be `'static + Clone`.
 /// We guarantee safety because the lifetime of this context is strictly bound
 /// to the `eval` function scope.
@@ -30,7 +32,7 @@ pub struct FieldContext {
 impl FieldContext {
     pub fn new(field: &mut AgentField) -> Self {
         Self {
-            ptr: field as *mut AgentField,
+            ptr: std::ptr::from_mut::<AgentField>(field),
         }
     }
 
@@ -48,7 +50,7 @@ impl FieldContext {
     pub fn get_x(&mut self, idx: i64) -> f64 {
         let field = self.get_field();
         if idx >= 0 {
-            field.pos_x.get(idx as usize).copied().unwrap_or(0.0) as f64
+            f64::from(field.pos_x.get(idx as usize).copied().unwrap_or(0.0))
         } else {
             0.0
         }
@@ -57,7 +59,7 @@ impl FieldContext {
     pub fn get_y(&mut self, idx: i64) -> f64 {
         let field = self.get_field();
         if idx >= 0 {
-            field.pos_y.get(idx as usize).copied().unwrap_or(0.0) as f64
+            f64::from(field.pos_y.get(idx as usize).copied().unwrap_or(0.0))
         } else {
             0.0
         }
@@ -66,7 +68,7 @@ impl FieldContext {
     pub fn get_behavior(&mut self, idx: i64) -> i64 {
         let field = self.get_field();
         if idx >= 0 {
-            field.behavior_state.get(idx as usize).copied().unwrap_or(0) as i64
+            i64::from(field.behavior_state.get(idx as usize).copied().unwrap_or(0))
         } else {
             0
         }
@@ -138,7 +140,7 @@ pub struct WorkerContext {
 impl WorkerContext {
     pub fn new(workers: &mut DataWorkerField) -> Self {
         Self {
-            ptr: workers as *mut DataWorkerField,
+            ptr: std::ptr::from_mut::<DataWorkerField>(workers),
         }
     }
 
@@ -148,7 +150,7 @@ impl WorkerContext {
     }
 
     pub fn spawn_worker(&mut self, task_id: i64, payload: &str) -> i64 {
-        self.get_workers().spawn_worker(task_id as u32, payload) as i64
+        i64::from(self.get_workers().spawn_worker(task_id as u32, payload))
     }
 
     /// Allows LLM scripts to recursively assign batch tasks to free workers.
@@ -171,7 +173,7 @@ impl WorkerContext {
     pub fn get_worker_state(&mut self, idx: i64) -> i64 {
         let workers = self.get_workers();
         if idx >= 0 {
-            workers.states.get(idx as usize).copied().unwrap_or(0) as i64
+            i64::from(workers.states.get(idx as usize).copied().unwrap_or(0))
         } else {
             0
         }
@@ -210,16 +212,16 @@ impl WorkerContext {
     }
 
     pub fn get_worker_memory(&mut self, idx: i64, slot: i64) -> f64 {
-        if idx >= 0 && slot >= 0 && slot < 8 {
+        if idx >= 0 && (0..8).contains(&slot) {
             if let Some(mem) = self.get_workers().memory.get(idx as usize) {
-                return mem[slot as usize] as f64;
+                return f64::from(mem[slot as usize]);
             }
         }
         0.0
     }
 
     pub fn set_worker_memory(&mut self, idx: i64, slot: i64, value: f64) {
-        if idx >= 0 && slot >= 0 && slot < 8 {
+        if idx >= 0 && (0..8).contains(&slot) {
             if let Some(mem) = self.get_workers().memory.get_mut(idx as usize) {
                 mem[slot as usize] = value as f32;
             }
@@ -227,7 +229,7 @@ impl WorkerContext {
     }
 }
 
-/// A wrapper pointer context to allow Rhai to safely manipulate the MessageBus.
+/// A wrapper pointer context to allow Rhai to safely manipulate the `MessageBus`.
 #[derive(Clone, CustomType)]
 pub struct MessageContext {
     ptr: *mut MessageBus,
@@ -236,7 +238,7 @@ pub struct MessageContext {
 impl MessageContext {
     pub fn new(bus: &mut MessageBus) -> Self {
         Self {
-            ptr: bus as *mut MessageBus,
+            ptr: std::ptr::from_mut::<MessageBus>(bus),
         }
     }
 
@@ -278,7 +280,7 @@ impl MessageContext {
     pub fn get_sender(&mut self, idx: i64) -> i64 {
         let bus = self.get_bus();
         if idx >= 0 && (idx as usize) < bus.len {
-            bus.sender_ids.get(idx as usize).copied().unwrap_or(0) as i64
+            i64::from(bus.sender_ids.get(idx as usize).copied().unwrap_or(0))
         } else {
             -1
         }
@@ -287,14 +289,14 @@ impl MessageContext {
     pub fn get_type(&mut self, idx: i64) -> i64 {
         let bus = self.get_bus();
         if idx >= 0 && (idx as usize) < bus.len {
-            bus.message_types.get(idx as usize).copied().unwrap_or(0) as i64
+            i64::from(bus.message_types.get(idx as usize).copied().unwrap_or(0))
         } else {
             -1
         }
     }
 }
 
-/// A wrapper pointer context to allow Rhai to safely manipulate the EnvironmentGrid.
+/// A wrapper pointer context to allow Rhai to safely manipulate the `EnvironmentGrid`.
 #[derive(Clone, CustomType)]
 pub struct EnvironmentContext {
     ptr: *mut EnvironmentGrid,
@@ -303,7 +305,7 @@ pub struct EnvironmentContext {
 impl EnvironmentContext {
     pub fn new(env: &mut EnvironmentGrid) -> Self {
         Self {
-            ptr: env as *mut EnvironmentGrid,
+            ptr: std::ptr::from_mut::<EnvironmentGrid>(env),
         }
     }
 
@@ -325,7 +327,7 @@ impl EnvironmentContext {
     }
 }
 
-/// A wrapper pointer context to allow Rhai to safely manipulate the VectorMemory (RAG).
+/// A wrapper pointer context to allow Rhai to safely manipulate the `VectorMemory` (RAG).
 #[derive(Clone, CustomType)]
 pub struct VectorMemoryContext {
     ptr: *mut VectorMemory,
@@ -334,7 +336,7 @@ pub struct VectorMemoryContext {
 impl VectorMemoryContext {
     pub fn new(mem: &mut VectorMemory) -> Self {
         Self {
-            ptr: mem as *mut VectorMemory,
+            ptr: std::ptr::from_mut::<VectorMemory>(mem),
         }
     }
 
@@ -429,7 +431,7 @@ impl ScriptEngine {
             |ctx: &mut FieldContext, x: f64, y: f64, health: f64| ctx.spawn(x, y, health),
         );
         engine.register_fn("agent_kill", |ctx: &mut FieldContext, idx: i64| {
-            ctx.kill(idx)
+            ctx.kill(idx);
         });
 
         // --- WORKER AGENT APIS FOR RHAI ---
@@ -599,14 +601,20 @@ impl ScriptEngine {
 
         // --- BUSINESS ANALYTICS APIS FOR RHAI ---
         engine.register_fn("json_extract_string", business::json_extract_string);
-        engine.register_fn("regex_extract", move |pattern: rhai::ImmutableString, text: rhai::ImmutableString| -> String {
-            let limit = cache_limit_clone1.load(Ordering::Relaxed);
-            business::regex_extract(&pattern, &text, limit)
-        });
-        engine.register_fn("regex_extract_all", move |pattern: rhai::ImmutableString, text: rhai::ImmutableString| -> rhai::Array {
-            let limit = cache_limit_clone2.load(Ordering::Relaxed);
-            business::regex_extract_all(&pattern, &text, limit)
-        });
+        engine.register_fn(
+            "regex_extract",
+            move |pattern: rhai::ImmutableString, text: rhai::ImmutableString| -> String {
+                let limit = cache_limit_clone1.load(Ordering::Relaxed);
+                business::regex_extract(&pattern, &text, limit)
+            },
+        );
+        engine.register_fn(
+            "regex_extract_all",
+            move |pattern: rhai::ImmutableString, text: rhai::ImmutableString| -> rhai::Array {
+                let limit = cache_limit_clone2.load(Ordering::Relaxed);
+                business::regex_extract_all(&pattern, &text, limit)
+            },
+        );
         engine.register_fn("sum_number_strings", business::sum_number_strings);
         engine.register_fn("multiply_matrix_1d", business::multiply_matrix_1d);
         engine.register_fn("dot_product", business::dot_product);
@@ -655,7 +663,7 @@ impl ScriptEngine {
         engine.register_fn(
             "canvas_line",
             |cx: &mut RenderContext, x1: f64, y1: f64, x2: f64, y2: f64, c: i64| {
-                cx.line(x1, y1, x2, y2, c)
+                cx.line(x1, y1, x2, y2, c);
             },
         );
         engine.register_fn(
@@ -715,17 +723,18 @@ impl ScriptEngine {
 
         // We can still keep utility functions
         engine.register_fn("render_html_card", |title: &str, content: &str| -> String {
-            format!(
-                "<div class='agent-card'><h3>{}</h3><p>{}</p></div>",
-                title, content
-            )
+            format!("<div class='agent-card'><h3>{title}</h3><p>{content}</p></div>")
         });
 
         // Security limits:
         engine.set_max_operations(1_000_000); // Expanded to allow deep learning/while loops before aborting
         engine.set_max_string_size(50_000); // Prevent memory exhaustion
 
-        Self { engine, max_regex_cache_items: cache_limit }
+        let meta = MetaScriptEngine::new(engine);
+        Self {
+            meta,
+            max_regex_cache_items: cache_limit,
+        }
     }
 
     /// Evaluates a Rhai script string and returns the resulting String.
@@ -761,15 +770,12 @@ impl ScriptEngine {
         scope.push("metrics", metrics);
 
         if script.is_empty() {
-            return Ok("".to_string());
+            return Ok(String::new());
         }
 
-        match self.engine.eval_with_scope::<Dynamic>(scope, script) {
+        match self.meta.eval_with_scope(script, scope) {
             Ok(result) => Ok(result.to_string()),
-            Err(e) => {
-                let err_str = e.to_string();
-                Err(format!("LLM Script Error: {}", err_str))
-            }
+            Err(e) => Err(format!("LLM Script Error: {e}")),
         }
     }
 
@@ -795,7 +801,7 @@ impl ScriptEngine {
     }
 }
 
-/// A wrapper pointer context to allow Rhai to safely command the CanvasEncoder.
+/// A wrapper pointer context to allow Rhai to safely command the `CanvasEncoder`.
 #[derive(Clone, CustomType)]
 pub struct RenderContext {
     ptr: *mut CanvasEncoder,
@@ -804,7 +810,7 @@ pub struct RenderContext {
 impl RenderContext {
     pub fn new(encoder: &mut CanvasEncoder) -> Self {
         Self {
-            ptr: encoder as *mut CanvasEncoder,
+            ptr: std::ptr::from_mut::<CanvasEncoder>(encoder),
         }
     }
 
@@ -842,7 +848,7 @@ pub struct ConfigContext {
 impl ConfigContext {
     pub fn new(config: &crate::field::KernelConfig) -> Self {
         Self {
-            ptr: config as *const _,
+            ptr: std::ptr::from_ref(config),
         }
     }
 
@@ -852,14 +858,14 @@ impl ConfigContext {
     }
 
     pub fn get_cursor_x(&mut self) -> f64 {
-        self.get_config().cursor_x as f64
+        f64::from(self.get_config().cursor_x)
     }
 
     pub fn get_cursor_y(&mut self) -> f64 {
-        self.get_config().cursor_y as f64
+        f64::from(self.get_config().cursor_y)
     }
 
     pub fn get_cursor_weight(&mut self) -> f64 {
-        self.get_config().cursor_weight as f64
+        f64::from(self.get_config().cursor_weight)
     }
 }

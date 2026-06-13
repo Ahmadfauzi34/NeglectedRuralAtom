@@ -27,7 +27,7 @@ pub struct DataWorkerField {
 
     pub(crate) free_slots: Vec<usize>,
     pub(crate) len: usize,
-    capacity: usize,
+    pub(crate) capacity: usize,
     pub(crate) max_arena_bytes: usize,
 }
 
@@ -123,28 +123,24 @@ impl DataWorkerField {
             if self.active[i] == 1 {
                 // Relocate Payload
                 let (p_start, p_end) = self.payload_slices[i];
-                if p_start != p_end {
-                    if let Some(text) = self.text_arena.get(p_start as usize..p_end as usize) {
-                        let new_start = new_arena.len() as u32;
-                        new_arena.push_str(text);
-                        self.payload_slices[i] = (new_start, new_arena.len() as u32);
-                    } else {
-                        self.payload_slices[i] = (new_arena.len() as u32, new_arena.len() as u32);
-                    }
+                if p_start == p_end {
+                    self.payload_slices[i] = (new_arena.len() as u32, new_arena.len() as u32);
+                } else if let Some(text) = self.text_arena.get(p_start as usize..p_end as usize) {
+                    let new_start = new_arena.len() as u32;
+                    new_arena.push_str(text);
+                    self.payload_slices[i] = (new_start, new_arena.len() as u32);
                 } else {
                     self.payload_slices[i] = (new_arena.len() as u32, new_arena.len() as u32);
                 }
 
                 // Relocate Result
                 let (r_start, r_end) = self.result_slices[i];
-                if r_start != r_end {
-                    if let Some(text) = self.text_arena.get(r_start as usize..r_end as usize) {
-                        let new_start = new_arena.len() as u32;
-                        new_arena.push_str(text);
-                        self.result_slices[i] = (new_start, new_arena.len() as u32);
-                    } else {
-                        self.result_slices[i] = (new_arena.len() as u32, new_arena.len() as u32);
-                    }
+                if r_start == r_end {
+                    self.result_slices[i] = (new_arena.len() as u32, new_arena.len() as u32);
+                } else if let Some(text) = self.text_arena.get(r_start as usize..r_end as usize) {
+                    let new_start = new_arena.len() as u32;
+                    new_arena.push_str(text);
+                    self.result_slices[i] = (new_start, new_arena.len() as u32);
                 } else {
                     self.result_slices[i] = (new_arena.len() as u32, new_arena.len() as u32);
                 }

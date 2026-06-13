@@ -102,7 +102,7 @@ impl AgentField {
         idx
     }
 
-    /// Ghost state removal: swap-drop alih-alih Vec::remove
+    /// Ghost state removal: swap-drop alih-alih `Vec::remove`
     /// O(1), tidak shifting, buffer tidak di-free
     pub fn kill_swap(&mut self, idx: usize) {
         if idx >= self.len {

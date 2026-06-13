@@ -91,7 +91,7 @@ impl VectorMemory {
     }
 
     /// Searches the entire memory bank for the highest cosine similarity match.
-    /// Returns the nearest memory_id and its similarity score.
+    /// Returns the nearest `memory_id` and its similarity score.
     pub fn search(&self, query_vector: &[f32]) -> Option<(String, f32)> {
         if self.len == 0 || query_vector.len() != EMBEDDING_DIM {
             return None;

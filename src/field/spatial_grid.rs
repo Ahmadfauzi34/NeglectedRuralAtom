@@ -40,8 +40,8 @@ impl SpatialGrid {
         let ix = (x * self.inv_cell_size) as i32;
         let iy = (y * self.inv_cell_size) as i32;
 
-        let ux = (ix as u32) as u64;
-        let uy = (iy as u32) as u64;
+        let ux = u64::from(ix as u32);
+        let uy = u64::from(iy as u32);
 
         (ux << 32) | uy
     }
@@ -73,8 +73,8 @@ impl SpatialGrid {
 
         for ix in start_ix..=end_ix {
             for iy in start_iy..=end_iy {
-                let ux = (ix as u32) as u64;
-                let uy = (iy as u32) as u64;
+                let ux = u64::from(ix as u32);
+                let uy = u64::from(iy as u32);
                 let key = (ux << 32) | uy;
 
                 if let Some(cell) = self.cells.get(&key) {

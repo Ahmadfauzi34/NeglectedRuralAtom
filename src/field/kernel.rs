@@ -3,7 +3,7 @@ use super::soa::AgentField;
 use super::spatial_grid::SpatialGrid;
 
 /// Config untuk kernel — internal Rust, tidak di-expose ke JS
-/// (parameter di-pass via primitive di KernelBridge::set_config)
+/// (parameter di-pass via primitive di `KernelBridge::set_config`)
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Copy, Serialize, Deserialize)]
@@ -46,9 +46,9 @@ impl Default for KernelConfig {
             max_vfs_bytes: 64 * 1024 * 1024,          // 64 MB
             max_graph_context_bytes: 2 * 1024 * 1024, // 2 MB
             max_regex_cache_items: 128,
-            worker_arena_bytes_per_agent: 4096,       // 4 KB * agents
-            bus_arena_bytes_per_agent: 2048,          // 2 KB * agents
-            vector_memory_bytes_per_capacity: 1024,   // 1 KB * capacity
+            worker_arena_bytes_per_agent: 4096, // 4 KB * agents
+            bus_arena_bytes_per_agent: 2048,    // 2 KB * agents
+            vector_memory_bytes_per_capacity: 1024, // 1 KB * capacity
         }
     }
 }
@@ -116,7 +116,7 @@ pub fn step_agents(
             let dist_sq = dx * dx + dy * dy;
 
             // Branchless: gunakan mask alih-alih if
-            let in_range = (dist_sq <= inf_r_sq) as i32 as f32; // 1.0 atau 0.0
+            let in_range = i32::from(dist_sq <= inf_r_sq) as f32; // 1.0 atau 0.0
             let inv_dist = in_range / (dist_sq + 1e-6); // epsilon untuk avoid div by zero
 
             // Separation: steer away
@@ -299,7 +299,7 @@ pub fn step_agents(
         let speed_sq = vx * vx + vy * vy;
 
         // Kalau speed_sq > max_speed_sq, scale down — branchless
-        let scale = (speed_sq > max_speed_sq) as i32 as f32;
+        let scale = i32::from(speed_sq > max_speed_sq) as f32;
         let speed = (speed_sq + 1e-6).sqrt();
         let factor = 1.0 - scale + scale * (config.max_speed / speed);
 
