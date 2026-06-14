@@ -275,7 +275,7 @@ impl KernelBridge {
             ..
         } = &mut *state;
 
-        let metrics_copy = self.telemetry.metrics.clone();
+        let metrics_copy = self.telemetry.metrics;
         let result = match self.script_engine.eval_agent(
             script,
             field,

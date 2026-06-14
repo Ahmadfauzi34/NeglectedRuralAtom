@@ -33,7 +33,7 @@ pub struct ExactCacheKey {
 
 #[derive(Clone)]
 pub struct CachedExecution {
-    pub result: Dynamic,
+    pub ast: rhai::Shared<AST>,
     pub expires_at_frame: u64,
 }
 
@@ -41,6 +41,7 @@ pub struct CachedExecution {
 #[derive(Default, Clone, Debug)]
 pub struct MetaTelemetry {
     pub l1_hits: u64,
+    pub l2_hits: u64,
     pub l3_hits: u64,
     pub misses: u64,
     pub avg_compile_us: u64,
@@ -52,6 +53,8 @@ pub struct MetaTelemetry {
 pub struct MetaEngineConfig {
     pub l1_max_agent_caches: usize,
     pub l1_ttl_frames: u64,
+    pub l2_max_patterns: usize,
+    pub l2_hamming_threshold: u32,
     pub l3_max_global_asts: usize,
     pub l3_lru_evict_batch: usize,
     pub enable_telemetry: bool,
@@ -63,11 +66,87 @@ impl Default for MetaEngineConfig {
         Self {
             l1_max_agent_caches: 2048,
             l1_ttl_frames: 60, // approx 1 second at 60fps
+            l2_max_patterns: 1024,
+            l2_hamming_threshold: 4, // 4 bits diff max out of 64
             l3_max_global_asts: 512,
             l3_lru_evict_batch: 16,
             enable_telemetry: true,
             max_script_length: 50_000,
         }
+    }
+}
+
+/// Layer 2: Fuzzy Pattern Matching via `SimHash`
+pub fn compute_simhash(script: &str) -> u64 {
+    let mut v = [0i32; 64];
+
+    // Simple word tokenization
+    for token in script.split_whitespace() {
+        let mut h = SeaHasher::new();
+        token.hash(&mut h);
+        let hash = h.finish();
+
+        for i in 0..64 {
+            let bit = (hash >> i) & 1;
+            if bit == 1 {
+                v[i] += 1;
+            } else {
+                v[i] -= 1;
+            }
+        }
+    }
+
+    let mut simhash = 0u64;
+    for i in 0..64 {
+        if v[i] > 0 {
+            simhash |= 1 << i;
+        }
+    }
+    simhash
+}
+
+pub fn hamming_distance(a: u64, b: u64) -> u32 {
+    (a ^ b).count_ones()
+}
+
+pub struct PatternIndex {
+    // simhash -> script_hash (which points to L3 pool)
+    entries: HashMap<u64, u64>,
+    pub max_items: usize,
+    pub threshold: u32,
+}
+
+impl PatternIndex {
+    pub fn new(max_items: usize, threshold: u32) -> Self {
+        Self {
+            entries: HashMap::new(),
+            max_items,
+            threshold,
+        }
+    }
+
+    /// Returns the nearest `script_hash` if a script within the threshold distance is found.
+    pub fn find_nearest(&self, query_simhash: u64) -> Option<u64> {
+        let mut best_match = None;
+        let mut min_distance = self.threshold + 1;
+
+        for (&stored_simhash, &script_hash) in &self.entries {
+            let distance = hamming_distance(query_simhash, stored_simhash);
+            if distance < min_distance {
+                min_distance = distance;
+                best_match = Some(script_hash);
+            }
+        }
+
+        best_match
+    }
+
+    pub fn store(&mut self, simhash: u64, script_hash: u64) {
+        if self.entries.len() >= self.max_items {
+            // Very simple clear strategy for memory limits
+            self.entries.clear();
+        }
+        self.entries.insert(simhash, script_hash);
     }
 }
 
@@ -85,16 +164,16 @@ impl AgentCache {
         }
     }
 
-    pub fn get(&self, key: &ExactCacheKey, current_frame: u64) -> Option<&Dynamic> {
+    pub fn get(&self, key: &ExactCacheKey, current_frame: u64) -> Option<rhai::Shared<AST>> {
         if let Some(cached) = self.entries.get(key) {
             if cached.expires_at_frame > current_frame {
-                return Some(&cached.result);
+                return Some(cached.ast.clone());
             }
         }
         None
     }
 
-    pub fn store(&mut self, key: ExactCacheKey, result: Dynamic, expires_at: u64) {
+    pub fn store(&mut self, key: ExactCacheKey, ast: rhai::Shared<AST>, expires_at: u64) {
         if self.entries.len() >= self.max_items {
             // Simple clear to avoid complex LRU overhead for fast-changing L1 cache
             self.entries.clear();
@@ -102,7 +181,7 @@ impl AgentCache {
         self.entries.insert(
             key,
             CachedExecution {
-                result,
+                ast,
                 expires_at_frame: expires_at,
             },
         );
@@ -167,6 +246,7 @@ impl GlobalAstPool {
 pub struct MetaScriptEngine {
     pub engine: Engine,
     pub agent_cache: AgentCache,
+    pub pattern_index: PatternIndex,
     pub global_ast_pool: GlobalAstPool,
     pub telemetry: MetaTelemetry,
     pub config: MetaEngineConfig,
@@ -179,6 +259,7 @@ impl MetaScriptEngine {
         Self {
             engine,
             agent_cache: AgentCache::new(config.l1_max_agent_caches),
+            pattern_index: PatternIndex::new(config.l2_max_patterns, config.l2_hamming_threshold),
             global_ast_pool: GlobalAstPool::new(config.l3_max_global_asts),
             telemetry: MetaTelemetry::default(),
             config,
@@ -233,19 +314,70 @@ impl MetaScriptEngine {
         };
 
         // L1 Cache Check (Exact Match)
-        if let Some(result) = self.agent_cache.get(&cache_key, self.frame_counter) {
+        if let Some(ast) = self.agent_cache.get(&cache_key, self.frame_counter) {
             if self.config.enable_telemetry {
                 self.telemetry.l1_hits += 1;
             }
-            return Ok(result.clone());
+            return self
+                .engine
+                .eval_ast_with_scope::<Dynamic>(scope, &ast)
+                .map_err(|e| format!("L1 Eval Error: {e}"));
         }
 
-        // L1 Miss -> Fallback to L3 Evaluation
-        let result = self.eval_with_scope_hashed(safe_script, scope, script_hash)?;
+        // L1 Miss -> L2 Cache Check
+        let simhash = compute_simhash(safe_script);
+        if let Some(matched_script_hash) = self.pattern_index.find_nearest(simhash) {
+            // Found a fuzzy match in L2, retrieve from L3 AST Pool
+            if let Some(ast) = self.global_ast_pool.get(matched_script_hash) {
+                if self.config.enable_telemetry {
+                    self.telemetry.l2_hits += 1;
+                }
 
-        // Store in L1
+                let result = self
+                    .engine
+                    .eval_ast_with_scope::<Dynamic>(scope, ast)
+                    .map_err(|e| format!("L2 Eval Error: {e}"))?;
+
+                // Store in L1 so future exact matches are faster
+                let expires = self.frame_counter + self.config.l1_ttl_frames;
+                self.agent_cache.store(cache_key, ast.clone(), expires);
+
+                return Ok(result);
+            }
+        }
+
+        // L1 & L2 Miss -> Fallback to L3 Evaluation (and Compilation)
+        // Check L3 manually to get the AST back to cache into L1
+        let ast = if let Some(cached_ast) = self.global_ast_pool.get(script_hash) {
+            if self.config.enable_telemetry {
+                self.telemetry.l3_hits += 1;
+            }
+            cached_ast.clone()
+        } else {
+            if self.config.enable_telemetry {
+                self.telemetry.misses += 1;
+            }
+            let new_ast = rhai::Shared::new(
+                self.engine
+                    .compile(safe_script)
+                    .map_err(|e| format!("Compile Error: {e}"))?,
+            );
+            self.global_ast_pool.store(script_hash, new_ast.clone());
+            new_ast
+        };
+
+        // Execute AST
+        let result = self
+            .engine
+            .eval_ast_with_scope::<Dynamic>(scope, &ast)
+            .map_err(|e| format!("Eval Error: {e}"))?;
+
+        // Store the ast in L1 cache
         let expires = self.frame_counter + self.config.l1_ttl_frames;
-        self.agent_cache.store(cache_key, result.clone(), expires);
+        self.agent_cache.store(cache_key, ast, expires);
+
+        // Add compiled script to L2 index
+        self.pattern_index.store(simhash, script_hash);
 
         Ok(result)
     }
