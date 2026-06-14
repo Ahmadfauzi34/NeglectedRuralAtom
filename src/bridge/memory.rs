@@ -236,7 +236,7 @@ impl KernelBridge {
             config,
             ..
         } = &mut *state;
-        let metrics_copy = self.telemetry.metrics;
+        let metrics_copy = self.telemetry.metrics.clone();
 
         let result = match self.script_engine.eval(
             script,
@@ -275,7 +275,7 @@ impl KernelBridge {
             ..
         } = &mut *state;
 
-        let metrics_copy = self.telemetry.metrics;
+        let metrics_copy = self.telemetry.metrics.clone();
         let result = match self.script_engine.eval_agent(
             script,
             field,
@@ -290,6 +290,61 @@ impl KernelBridge {
         ) {
             Ok(out) => out,
             Err(err) => err,
+        };
+
+        self.telemetry.record_script_eval(start_time);
+        result
+    }
+
+    /// Clears specific script hashes from L1, L2, and L3 caches
+    #[wasm_bindgen]
+    pub fn forget_script(&mut self, script: &str) {
+        self.script_engine.forget_script(script);
+    }
+
+    /// Clears all execution caches
+    #[wasm_bindgen]
+    pub fn forget_all(&mut self) {
+        self.script_engine.forget_all();
+    }
+
+    /// Evaluates a Rhai script over a swarm of agents (array of indices).
+    /// Returns a JSON string array of execution results.
+    #[wasm_bindgen]
+    pub fn eval_swarm_script(&mut self, script: &str, agent_indices: Vec<usize>) -> String {
+        let start_time = Telemetry::start_timer();
+
+        let Ok(mut state) = self.state.write() else {
+            return "[\"WASM Lock Error: Cannot access state\"]".to_string();
+        };
+        let SharedState {
+            field,
+            workers,
+            messages,
+            env_grid,
+            vector_mem,
+            config,
+            ..
+        } = &mut *state;
+
+        let metrics_copy = self.telemetry.metrics.clone();
+        let result = match self.script_engine.eval_broadcast(
+            script,
+            field,
+            workers,
+            messages,
+            env_grid,
+            vector_mem,
+            &mut self.encoder,
+            config,
+            metrics_copy,
+            &agent_indices,
+        ) {
+            Ok(results) => match serde_json::to_string(&results) {
+                Ok(json) => json,
+                Err(_) => "[\"JSON Serialization Error\"]".to_string(),
+            },
+            Err(err) => format!("[\"{}\"]", err.replace('"', "\\\"")),
         };
 
         self.telemetry.record_script_eval(start_time);
@@ -316,7 +371,7 @@ impl KernelBridge {
                     config,
                     ..
                 } = &mut *state;
-                let metrics_copy = self.telemetry.metrics;
+                let metrics_copy = self.telemetry.metrics.clone();
 
                 let mut scope = rhai::Scope::new();
                 // We utilize the ScriptEngine's existing capability to inject field bindings into a base scope
@@ -546,7 +601,9 @@ impl KernelBridge {
     }
 
     /// Exposes a serialized JSON of the engine metrics to Javascript
-    pub fn get_metrics_json(&self) -> String {
+    pub fn get_metrics_json(&mut self) -> String {
+        self.telemetry
+            .sync_meta_metrics(&self.script_engine.meta.telemetry);
         self.telemetry.get_metrics_json()
     }
 }

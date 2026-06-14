@@ -17,6 +17,12 @@ pub struct EngineMetrics {
 
     pub text_arena_bytes: usize,
     pub memory_vector_count: usize,
+
+    // Meta Script Engine Caching metrics
+    pub l1_hits: u64,
+    pub l2_hits: u64,
+    pub l3_hits: u64,
+    pub script_misses: u64,
 }
 
 pub struct Telemetry {
@@ -84,5 +90,15 @@ impl Telemetry {
     /// Serializes the current metrics state into a JSON string for JS consumption.
     pub fn get_metrics_json(&self) -> String {
         serde_json::to_string(&self.metrics).unwrap_or_else(|_| "{}".to_string())
+    }
+
+    pub fn sync_meta_metrics(
+        &mut self,
+        meta_telemetry: &crate::scripting::meta_optimizer::MetaTelemetry,
+    ) {
+        self.metrics.l1_hits = meta_telemetry.l1_hits;
+        self.metrics.l2_hits = meta_telemetry.l2_hits;
+        self.metrics.l3_hits = meta_telemetry.l3_hits;
+        self.metrics.script_misses = meta_telemetry.misses;
     }
 }

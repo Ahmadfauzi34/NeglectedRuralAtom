@@ -382,6 +382,49 @@ impl MetaScriptEngine {
         Ok(result)
     }
 
+    // Cache Invalidation Hooks
+
+    pub fn forget_script(&mut self, script: &str) {
+        let mut h = SeaHasher::new();
+        script.hash(&mut h);
+        let script_hash = h.finish();
+
+        let simhash = compute_simhash(script);
+
+        // Remove from L3
+        self.global_ast_pool.asts.remove(&script_hash);
+        self.global_ast_pool.last_accessed.remove(&script_hash);
+
+        // Remove from L2
+        self.pattern_index.entries.remove(&simhash);
+
+        // Remove from L1 (Requires iterating and retaining)
+        self.agent_cache
+            .entries
+            .retain(|k, _| k.script_hash != script_hash);
+    }
+
+    pub fn forget_agent(&mut self, script: &str, behavior: u32, x: f32, y: f32, health: f32) {
+        let mut h = SeaHasher::new();
+        script.hash(&mut h);
+        let script_hash = h.finish();
+
+        let fingerprint = ContextFingerprint::new(behavior, x, y, health);
+        let key = ExactCacheKey {
+            script_hash,
+            context_fingerprint: fingerprint,
+        };
+
+        self.agent_cache.entries.remove(&key);
+    }
+
+    pub fn forget_all(&mut self) {
+        self.agent_cache.entries.clear();
+        self.pattern_index.entries.clear();
+        self.global_ast_pool.asts.clear();
+        self.global_ast_pool.last_accessed.clear();
+    }
+
     pub fn eval_with_scope(&mut self, script: &str, scope: &mut Scope) -> Result<Dynamic, String> {
         let mut safe_script = script;
         if safe_script.len() > self.config.max_script_length {

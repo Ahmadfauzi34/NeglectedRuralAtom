@@ -830,8 +830,46 @@ impl ScriptEngine {
         }
     }
 
+    pub fn eval_broadcast(
+        &mut self,
+        script: &str,
+        field: &mut AgentField,
+        workers: &mut DataWorkerField,
+        messages: &mut MessageBus,
+        env_grid: &mut EnvironmentGrid,
+        vector_mem: &mut VectorMemory,
+        encoder: &mut CanvasEncoder,
+        config: &crate::field::KernelConfig,
+        metrics: EngineMetrics,
+        agent_indices: &[usize],
+    ) -> Result<Vec<String>, String> {
+        let mut results = Vec::with_capacity(agent_indices.len());
+        for &idx in agent_indices {
+            match self.eval_agent(
+                script, field, workers, messages, env_grid, vector_mem, encoder, config, metrics,
+                idx,
+            ) {
+                Ok(res) => results.push(res),
+                Err(e) => return Err(e),
+            }
+        }
+        Ok(results)
+    }
+
     /// Evaluates a Rhai script string and returns the resulting String.
     /// Passes the contexts as dynamic variables to the script.
+    pub fn forget_script(&mut self, script: &str) {
+        self.meta.forget_script(script);
+    }
+
+    pub fn forget_agent(&mut self, script: &str, behavior: u32, x: f32, y: f32, health: f32) {
+        self.meta.forget_agent(script, behavior, x, y, health);
+    }
+
+    pub fn forget_all(&mut self) {
+        self.meta.forget_all();
+    }
+
     pub fn eval(
         &mut self,
         script: &str,
