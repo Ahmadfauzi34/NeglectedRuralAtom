@@ -57,3 +57,10 @@ Logika *Pipeline* (Pohon Keputusan LLM) diproses menggunakan `GraphExecutor` ber
 ## 10. Contextual Meta-Learning & Deep Reflective Loops
 Infrastruktur telah ditingkatkan (*headroom* maksimum mencapai 50.000 iterasi graf dan 1.000.000 operasi *engine*) untuk memungkinkan "Agent Reflective Cycles".
 * **Context Evolution**: Menggunakan `context_evolution` (basis *Orthogonal Projection*) agen tidak hanya mengoptimalkan kecepatan, tetapi secara bertahap belajar menyelaraskan matriks internal mereka (*Agent Context*) terhadap pemahaman holistik kerangka kerja (*Broader Context*). *Infinite loop protection* dirancang pasif, agen memutar simulasi `while` mereka secara otonom di ruang WASM.
+
+## 11. Multi-layered Meta Script Engine v2.0
+Infrastruktur evaluasi *script* Rhai telah dioptimalkan secara bertingkat untuk mengakomodasi agen LLM yang memicu evaluasi berulang kali:
+* **L1 Exact Cache:** (O(1) Overhead) Memetakan hash skrip dan *ContextFingerprint* (behavior, pos_x, pos_y, health dari `AgentField`) ke `rhai::Shared<AST>` melalui `AgentCache`. Secara drastis menurunkan waktu eksekusi apabila state agent dan skrip tidak berubah. Di-clear berdasarkan `l1_ttl_frames`.
+* **L2 Fuzzy Pattern Matching (SimHash):** Menyimpan *64-bit feature fingerprint* dari setiap skrip menggunakan *SimHash*. Memungkinkan toleransi (fuzzy match) terhadap perubahan spasi atau komentar dari LLM menggunakan kalkulasi Hamming Distance (`PatternIndex`) dan segera mengekstrak `AST` terkait.
+* **L3 Global AST Pool:** Mengeksekusi kompilasi penuh menggunakan *LRU caching eviction*. Melindungi *hot loops* (seperti `eval_llm_script` dan `eval_broadcast`) dari *out-of-memory errors* (OOM).
+* **Swarm Execution:** Hindari pemanggilan loop evaluasi yang membentur WASM boundary berulang kali. Gunakan API `eval_swarm_script` dari JS untuk memicu loop `eval_broadcast` native di Rust.
