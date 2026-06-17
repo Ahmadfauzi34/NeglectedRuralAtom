@@ -58,7 +58,7 @@ impl EnvironmentGrid {
     /// Clamps very small values to 0.0 to prevent subnormal float slowdowns.
     pub fn decay(&mut self, factor: f32) {
         for val in &mut self.cells {
-            if *val > 0.001 {
+            if val.abs() > 0.001 {
                 *val *= factor;
             } else {
                 *val = 0.0;

@@ -28,18 +28,25 @@ pub struct ScriptEngine {
 #[derive(Clone, CustomType)]
 pub struct FieldContext {
     ptr: *mut AgentField,
+    grid_ptr: *mut crate::field::SpatialGrid,
 }
 
 impl FieldContext {
-    pub fn new(field: &mut AgentField) -> Self {
+    pub fn new(field: &mut AgentField, grid: &mut crate::field::SpatialGrid) -> Self {
         Self {
             ptr: std::ptr::from_mut::<AgentField>(field),
+            grid_ptr: std::ptr::from_mut::<crate::field::SpatialGrid>(grid),
         }
     }
 
     #[inline]
     fn get_field(&mut self) -> &mut AgentField {
         unsafe { &mut *self.ptr }
+    }
+
+    #[inline]
+    fn get_grid(&mut self) -> &mut crate::field::SpatialGrid {
+        unsafe { &mut *self.grid_ptr }
     }
 
     // --- PRIMITIVE API FOR RHAI ---
@@ -130,26 +137,34 @@ impl FieldContext {
     }
 
     pub fn get_neighbors(&mut self, idx: i64, radius: f64) -> Array {
-        let mut neighbors = Vec::new();
+        let mut results = Array::new();
         let field = self.get_field();
         if idx >= 0 && (idx as usize) < field.len {
             let u_idx = idx as usize;
             let px = field.pos_x[u_idx];
             let py = field.pos_y[u_idx];
-            let r_sq = (radius * radius) as f32;
 
-            for j in 0..field.len {
+            let mut neighbors_indices = Vec::new();
+            {
+                let grid = self.get_grid();
+                grid.query_neighbors(px, py, radius as f32, &mut neighbors_indices);
+            }
+
+            // Re-fetch field for bounds checking and data access
+            let field = self.get_field();
+            let r_sq = (radius * radius) as f32;
+            for &j in &neighbors_indices {
                 if j == u_idx || field.active[j] == 0 {
                     continue;
                 }
                 let dx = field.pos_x[j] - px;
                 let dy = field.pos_y[j] - py;
                 if dx * dx + dy * dy <= r_sq {
-                    neighbors.push(rhai::Dynamic::from(j as i64));
+                    results.push(rhai::Dynamic::from(j as i64));
                 }
             }
         }
-        neighbors
+        results
     }
 
     pub fn get_distance(&mut self, idx1: i64, idx2: i64) -> f64 {
@@ -685,11 +700,13 @@ impl ScriptEngine {
         engine.register_fn("mem_count", VectorMemoryContext::get_count);
 
         // --- DOM MANIPULATION APIS FOR RHAI ---
+        let dom_ctx = DomContext::new();
 
+        let dom = dom_ctx.clone();
         engine.register_fn(
             "dom_get_html",
-            |target_id: &str| -> Result<String, String> {
-                if let Some(dom) = DomContext::new() {
+            move |target_id: &str| -> Result<String, String> {
+                if let Some(dom) = &dom {
                     dom.get_html(target_id)
                 } else {
                     Err("DOM Context unavailable".to_string())
@@ -697,10 +714,11 @@ impl ScriptEngine {
             },
         );
 
+        let dom = dom_ctx.clone();
         engine.register_fn(
             "dom_insert_html",
-            |target_id: &str, position: &str, html: &str| -> Result<(), String> {
-                if let Some(dom) = DomContext::new() {
+            move |target_id: &str, position: &str, html: &str| -> Result<(), String> {
+                if let Some(dom) = &dom {
                     dom.insert_html_at(target_id, position, html)
                 } else {
                     Err("DOM Context unavailable".to_string())
@@ -708,10 +726,11 @@ impl ScriptEngine {
             },
         );
 
+        let dom = dom_ctx.clone();
         engine.register_fn(
             "dom_diff_replace_html",
-            |target_id: &str, old_str: &str, new_str: &str| -> Result<bool, String> {
-                if let Some(dom) = DomContext::new() {
+            move |target_id: &str, old_str: &str, new_str: &str| -> Result<bool, String> {
+                if let Some(dom) = &dom {
                     dom.diff_and_replace_html(target_id, old_str, new_str)
                 } else {
                     Err("DOM Context unavailable".to_string())
@@ -719,10 +738,11 @@ impl ScriptEngine {
             },
         );
 
+        let dom = dom_ctx.clone();
         engine.register_fn(
             "dom_append_html",
-            |target_id: &str, html: &str| -> Result<(), String> {
-                if let Some(dom) = DomContext::new() {
+            move |target_id: &str, html: &str| -> Result<(), String> {
+                if let Some(dom) = &dom {
                     dom.append_html(target_id, html)
                 } else {
                     Err("DOM Context unavailable".to_string())
@@ -730,10 +750,11 @@ impl ScriptEngine {
             },
         );
 
+        let dom = dom_ctx.clone();
         engine.register_fn(
             "dom_set_inner_html",
-            |target_id: &str, html: &str| -> Result<(), String> {
-                if let Some(dom) = DomContext::new() {
+            move |target_id: &str, html: &str| -> Result<(), String> {
+                if let Some(dom) = &dom {
                     dom.set_inner_html(target_id, html)
                 } else {
                     Err("DOM Context unavailable".to_string())
@@ -741,10 +762,11 @@ impl ScriptEngine {
             },
         );
 
+        let dom = dom_ctx.clone();
         engine.register_fn(
             "dom_set_text",
-            |target_id: &str, text: &str| -> Result<(), String> {
-                if let Some(dom) = DomContext::new() {
+            move |target_id: &str, text: &str| -> Result<(), String> {
+                if let Some(dom) = &dom {
                     dom.set_text_content(target_id, text)
                 } else {
                     Err("DOM Context unavailable".to_string())
@@ -752,10 +774,11 @@ impl ScriptEngine {
             },
         );
 
+        let dom = dom_ctx.clone();
         engine.register_fn(
             "dom_set_style",
-            |target_id: &str, property: &str, value: &str| -> Result<(), String> {
-                if let Some(dom) = DomContext::new() {
+            move |target_id: &str, property: &str, value: &str| -> Result<(), String> {
+                if let Some(dom) = &dom {
                     dom.set_style(target_id, property, value)
                 } else {
                     Err("DOM Context unavailable".to_string())
@@ -763,10 +786,11 @@ impl ScriptEngine {
             },
         );
 
+        let dom = dom_ctx.clone();
         engine.register_fn(
             "dom_get_value",
-            |target_id: &str| -> Result<String, String> {
-                if let Some(dom) = DomContext::new() {
+            move |target_id: &str| -> Result<String, String> {
+                if let Some(dom) = &dom {
                     dom.get_value(target_id)
                 } else {
                     Err("DOM Context unavailable".to_string())
@@ -774,16 +798,17 @@ impl ScriptEngine {
             },
         );
 
+        let dom = dom_ctx.clone();
         engine.register_fn(
             "dom_canvas_fill_rect",
-            |target_id: &str,
-             x: f64,
-             y: f64,
-             w: f64,
-             h: f64,
-             fill_style: &str|
-             -> Result<(), String> {
-                if let Some(dom) = DomContext::new() {
+            move |target_id: &str,
+                  x: f64,
+                  y: f64,
+                  w: f64,
+                  h: f64,
+                  fill_style: &str|
+                  -> Result<(), String> {
+                if let Some(dom) = &dom {
                     dom.canvas_fill_rect(target_id, x, y, w, h, fill_style)
                 } else {
                     Err("DOM Context unavailable".to_string())
@@ -791,10 +816,11 @@ impl ScriptEngine {
             },
         );
 
+        let dom = dom_ctx.clone();
         engine.register_fn(
             "dom_canvas_clear_rect",
-            |target_id: &str, x: f64, y: f64, w: f64, h: f64| -> Result<(), String> {
-                if let Some(dom) = DomContext::new() {
+            move |target_id: &str, x: f64, y: f64, w: f64, h: f64| -> Result<(), String> {
+                if let Some(dom) = &dom {
                     dom.canvas_clear_rect(target_id, x, y, w, h)
                 } else {
                     Err("DOM Context unavailable".to_string())
@@ -802,16 +828,17 @@ impl ScriptEngine {
             },
         );
 
+        let dom = dom_ctx.clone();
         engine.register_fn(
             "dom_canvas_draw_text",
-            |target_id: &str,
-             text: &str,
-             x: f64,
-             y: f64,
-             font: &str,
-             color: &str|
-             -> Result<(), String> {
-                if let Some(dom) = DomContext::new() {
+            move |target_id: &str,
+                  text: &str,
+                  x: f64,
+                  y: f64,
+                  font: &str,
+                  color: &str|
+                  -> Result<(), String> {
+                if let Some(dom) = &dom {
                     dom.canvas_draw_text(target_id, text, x, y, font, color)
                 } else {
                     Err("DOM Context unavailable".to_string())
@@ -1018,11 +1045,12 @@ impl ScriptEngine {
         env_grid: &mut EnvironmentGrid,
         vector_mem: &mut VectorMemory,
         vfs: &mut VirtualFileSystem,
+        spatial_grid: &mut crate::field::SpatialGrid,
         encoder: &mut CanvasEncoder,
         config: &crate::field::KernelConfig,
         metrics: EngineMetrics,
     ) -> Result<String, String> {
-        let f_ctx = FieldContext::new(field);
+        let f_ctx = FieldContext::new(field, spatial_grid);
         let w_ctx = WorkerContext::new(workers);
         let m_ctx = MessageContext::new(messages);
         let e_ctx = EnvironmentContext::new(env_grid);
@@ -1062,14 +1090,25 @@ impl ScriptEngine {
         env_grid: &mut EnvironmentGrid,
         vector_mem: &mut VectorMemory,
         vfs: &mut VirtualFileSystem,
+        spatial_grid: &mut crate::field::SpatialGrid,
         encoder: &mut CanvasEncoder,
         config: &crate::field::KernelConfig,
         metrics: EngineMetrics,
     ) -> Result<String, String> {
         let mut scope = Scope::new();
         self.eval_with_injected_scope(
-            &mut scope, script, field, workers, messages, env_grid, vector_mem, vfs, encoder,
-            config, metrics,
+            &mut scope,
+            script,
+            field,
+            workers,
+            messages,
+            env_grid,
+            vector_mem,
+            vfs,
+            spatial_grid,
+            encoder,
+            config,
+            metrics,
         )
     }
 }

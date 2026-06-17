@@ -84,9 +84,6 @@ pub fn step_agents(
     field.acc_x[..count].fill(0.0);
     field.acc_y[..count].fill(0.0);
 
-    // Scratch buffer for neighbor querying to avoid per-agent allocation
-    let mut neighbors_buf = Vec::with_capacity(64);
-
     // === PASS 1: Field influence computation (continuous query) ===
     for i in 0..count {
         if field.active[i] == 0 {
@@ -104,9 +101,9 @@ pub fn step_agents(
         let mut coh_y = 0.0f32;
         let mut neighbors = 0u32;
 
-        grid.query_neighbors(px, py, inf_r, &mut neighbors_buf);
+        grid.query_neighbors(px, py, inf_r, &mut field.neighbors_scratch);
 
-        for &j in &neighbors_buf {
+        for &j in &field.neighbors_scratch {
             if i == j || field.active[j] == 0 {
                 continue;
             }
@@ -231,12 +228,12 @@ pub fn step_agents(
             }
             4 => {
                 // Predator: Find nearest prey (State 5) and chase it
-                grid.query_neighbors(px, py, inf_r * 2.0, &mut neighbors_buf);
+                grid.query_neighbors(px, py, inf_r * 2.0, &mut field.neighbors_scratch);
                 let mut closest_dist_sq = f32::MAX;
                 let mut target_dx = 0.0;
                 let mut target_dy = 0.0;
 
-                for &j in &neighbors_buf {
+                for &j in &field.neighbors_scratch {
                     if i == j || field.active[j] == 0 {
                         continue;
                     }
@@ -261,8 +258,8 @@ pub fn step_agents(
             }
             5 => {
                 // Prey: Find nearest predator (State 4) and flee
-                grid.query_neighbors(px, py, inf_r * 2.0, &mut neighbors_buf);
-                for &j in &neighbors_buf {
+                grid.query_neighbors(px, py, inf_r * 2.0, &mut field.neighbors_scratch);
+                for &j in &field.neighbors_scratch {
                     if i == j || field.active[j] == 0 {
                         continue;
                     }

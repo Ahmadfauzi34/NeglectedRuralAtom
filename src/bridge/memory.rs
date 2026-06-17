@@ -234,8 +234,8 @@ impl KernelBridge {
             env_grid,
             vector_mem,
             vfs,
+            spatial_grid,
             config,
-            ..
         } = &mut *state;
         let metrics_copy = self.telemetry.metrics;
 
@@ -247,6 +247,7 @@ impl KernelBridge {
             env_grid,
             vector_mem,
             vfs,
+            spatial_grid,
             &mut self.encoder,
             config,
             metrics_copy,
@@ -277,8 +278,8 @@ impl KernelBridge {
                     env_grid,
                     vector_mem,
                     vfs,
+                    spatial_grid,
                     config,
-                    ..
                 } = &mut *state;
                 let metrics_copy = self.telemetry.metrics;
 
@@ -293,6 +294,7 @@ impl KernelBridge {
                     env_grid,
                     vector_mem,
                     vfs,
+                    spatial_grid,
                     &mut self.encoder,
                     config,
                     metrics_copy,

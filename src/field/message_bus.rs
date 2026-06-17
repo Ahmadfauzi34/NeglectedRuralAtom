@@ -75,10 +75,13 @@ impl MessageBus {
         self.payload_slices.push((p_start, p_end));
 
         // Populate fast lookup index
-        self.receiver_index
-            .entry(receiver_id)
-            .or_default()
-            .push(current_idx);
+        if let Some(indices) = self.receiver_index.get_mut(&receiver_id) {
+            indices.push(current_idx);
+        } else {
+            let mut v = Vec::with_capacity(4);
+            v.push(current_idx);
+            self.receiver_index.insert(receiver_id, v);
+        }
 
         self.len += 1;
     }
@@ -120,7 +123,18 @@ impl MessageBus {
         self.message_types.clear();
         self.payload_slices.clear();
         self.text_arena.clear();
-        self.receiver_index.clear();
+
+        // Anti-memory-leak: If the index has too many entries (e.g. many one-off receiver IDs),
+        // completely clear the HashMap to free memory. Otherwise, just clear the inner vectors
+        // to reuse their allocated capacity for the next frame.
+        if self.receiver_index.len() > 1024 {
+            self.receiver_index.clear();
+        } else {
+            for v in self.receiver_index.values_mut() {
+                v.clear();
+            }
+        }
+
         self.len = 0;
     }
 }

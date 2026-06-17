@@ -6,15 +6,21 @@ use web_sys::{
 /// A utility module exposing safe wrappers around `web-sys` DOM manipulation.
 /// This allows the Rust kernel (and subsequently Rhai scripts) to manipulate
 /// the webpage directly without needing JavaScript glue code.
+#[derive(Clone)]
 pub struct DomContext {
     document: Document,
 }
 
 impl DomContext {
     pub fn new() -> Option<Self> {
-        let win = window()?;
-        let document = win.document()?;
-        Some(Self { document })
+        #[cfg(all(target_arch = "wasm32", not(test)))]
+        {
+            let win = window()?;
+            let document = win.document()?;
+            return Some(Self { document });
+        }
+        #[allow(unreachable_code)]
+        None
     }
 
     /// Retrieves the inner HTML of a specific container ID.
