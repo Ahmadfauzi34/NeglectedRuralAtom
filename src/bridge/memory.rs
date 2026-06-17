@@ -233,6 +233,7 @@ impl KernelBridge {
             messages,
             env_grid,
             vector_mem,
+            vfs,
             config,
             ..
         } = &mut *state;
@@ -245,6 +246,7 @@ impl KernelBridge {
             messages,
             env_grid,
             vector_mem,
+            vfs,
             &mut self.encoder,
             config,
             metrics_copy,
@@ -274,6 +276,7 @@ impl KernelBridge {
                     messages,
                     env_grid,
                     vector_mem,
+                    vfs,
                     config,
                     ..
                 } = &mut *state;
@@ -289,6 +292,7 @@ impl KernelBridge {
                     messages,
                     env_grid,
                     vector_mem,
+                    vfs,
                     &mut self.encoder,
                     config,
                     metrics_copy,
