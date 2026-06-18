@@ -8,6 +8,7 @@ use crate::field::{
 };
 use crate::graph::{GraphExecutor, ScriptNode};
 use crate::prompt::PromptBuilder;
+use crate::recursive::{MetaAgent, OrchestratorAgent};
 use crate::render::{agent_renderer::encode_agents, CanvasEncoder, GpuBuffer};
 use crate::scripting::ScriptEngine;
 use crate::telemetry::Telemetry;
@@ -42,6 +43,7 @@ pub struct KernelBridge {
     telemetry: Telemetry,
     graph_executor: GraphExecutor,
     worker_callback: Option<js_sys::Function>,
+    meta_agent: Option<MetaAgent>,
 }
 
 #[wasm_bindgen]
@@ -91,6 +93,7 @@ impl KernelBridge {
             telemetry: Telemetry::new(),
             graph_executor: GraphExecutor::new(config.max_graph_context_bytes),
             worker_callback: None,
+            meta_agent: None, // Lazy initialization or specific command trigger
         }
     }
 
@@ -233,8 +236,9 @@ impl KernelBridge {
             messages,
             env_grid,
             vector_mem,
+            vfs,
+            spatial_grid,
             config,
-            ..
         } = &mut *state;
         let metrics_copy = self.telemetry.metrics;
 
@@ -245,6 +249,8 @@ impl KernelBridge {
             messages,
             env_grid,
             vector_mem,
+            vfs,
+            spatial_grid,
             &mut self.encoder,
             config,
             metrics_copy,
@@ -274,8 +280,9 @@ impl KernelBridge {
                     messages,
                     env_grid,
                     vector_mem,
+                    vfs,
+                    spatial_grid,
                     config,
-                    ..
                 } = &mut *state;
                 let metrics_copy = self.telemetry.metrics;
 
@@ -289,6 +296,8 @@ impl KernelBridge {
                     messages,
                     env_grid,
                     vector_mem,
+                    vfs,
+                    spatial_grid,
                     &mut self.encoder,
                     config,
                     metrics_copy,
@@ -315,7 +324,7 @@ impl KernelBridge {
         result
     }
 
-    /// Builds a prompt string containing the active agent states.
+    /// Builds a prompt string containing the current kernel state (data processing focused).
     /// Uses a snapshot approach to quickly release the `RwLock` and avoid blocking `step()`.
     pub fn generate_llm_prompt(&mut self) -> String {
         // Scope the lock to copy only what we need (Snapshot)
@@ -324,17 +333,16 @@ impl KernelBridge {
                 return String::new();
             };
 
-            // Limit snapshot size to avoid cloning huge arrays if not necessary
-            let limit = state.field.len.min(50);
-            let mut snap = Vec::with_capacity(limit);
-
-            let mut count = 0;
+            // 1. Agents Snapshot
+            let a_limit = state.field.len.min(20);
+            let mut agents_snap = Vec::with_capacity(a_limit);
+            let mut a_count = 0;
             for i in 0..state.field.len {
-                if count >= limit {
+                if a_count >= a_limit {
                     break;
                 }
                 if state.field.active[i] == 1 {
-                    snap.push((
+                    agents_snap.push((
                         i,
                         state.field.pos_x[i],
                         state.field.pos_y[i],
@@ -342,16 +350,43 @@ impl KernelBridge {
                         state.field.vel_y[i],
                         state.field.health[i],
                     ));
-                    count += 1;
+                    a_count += 1;
                 }
             }
-            (snap, state.field.len)
+
+            // 2. Workers Snapshot
+            let w_limit = state.workers.capacity.min(20);
+            let mut workers_snap = Vec::with_capacity(w_limit);
+            let mut w_count = 0;
+            for i in 0..state.workers.capacity {
+                if w_count >= w_limit {
+                    break;
+                }
+                if state.workers.active[i] == 1 {
+                    workers_snap.push((
+                        i,
+                        state.workers.task_ids[i],
+                        state.workers.states[i],
+                        state.workers.progress[i],
+                    ));
+                    w_count += 1;
+                }
+            }
+
+            // 3. VFS Snapshot (list of files)
+            let vfs_files = state.vfs.list_directory("");
+
+            crate::prompt::SystemSnapshot {
+                agents: agents_snap,
+                workers: workers_snap,
+                vfs_files,
+                metrics: self.telemetry.metrics,
+                total_agents: state.field.len,
+            }
         }; // Read Lock is DROPPED here immediately!
 
-        // Now build the prompt text (which takes formatting time) without locking the main thread
-        self.prompt_builder
-            .build_from_snapshot(&snapshot.0, snapshot.1)
-            .to_string()
+        // Now build the prompt text without locking the main thread
+        self.prompt_builder.build_from_snapshot(&snapshot).to_string()
     }
 
     pub fn spawn(&mut self, x: f32, y: f32, health: f32) -> usize {
@@ -399,15 +434,15 @@ impl KernelBridge {
     pub fn step(&mut self) {
         let start_time = Telemetry::start_timer();
 
-        // Trigger any asynchronous callbacks to JS for completed LLM tasks
+        // 1. DATA PROCESSING PHASE (Non-visual, high priority)
         self.flush_worker_events();
+
         let Ok(mut state) = self.state.write() else {
             return;
         };
 
         // Record structural counts into telemetry
         self.telemetry.metrics.active_physics_agents = state.field.agent_count();
-        // Prevent overflow if free_slots is larger than len (e.g. initialization)
         self.telemetry.metrics.active_data_workers = state
             .workers
             .len
@@ -416,36 +451,34 @@ impl KernelBridge {
         self.telemetry.metrics.total_messages = state.messages.len;
         self.telemetry.metrics.memory_vector_count = state.vector_mem.len;
 
+        // Tick meta engine for AST Cache maintenance (Cognitive loop)
+        self.script_engine.meta.tick();
+
+        // 2. SIMULATION & PHYSICS PHASE
         // Destructure state to avoid borrow checker conflicts
         let SharedState {
             field,
-            workers: _,
-            messages: _,
             env_grid,
-            vector_mem: _,
             config,
             spatial_grid,
             ..
         } = &mut *state;
 
-        // Execute pending commands
+        // Execute pending commands (can be physics or data commands)
         self.cmd_bus.execute(field, config);
 
-        // Decay environment pheromones slightly every frame
-        env_grid.decay(0.99);
+        // Physics step (Only if dt > 0 to allow freezing visual simulation while processing data)
+        if config.dt > 0.0 {
+            env_grid.decay(0.99);
+            step_agents(field, config, spatial_grid, env_grid);
+        }
 
-        // Step physics and AI
-        step_agents(field, config, spatial_grid, env_grid);
-
-        // Tick meta engine for AST Cache maintenance
-        self.script_engine.meta.tick();
-
-        // Render pass optimization: Branch execution based on chosen target
+        // 3. RENDERING PHASE (Visual bias mitigation: rendering is the last and optional step)
         if self.use_webgl {
             // Zero-copy Instanced Buffer Rendering for WebGL
             self.gpu_buffer.update(field);
         } else {
-            // Classic CPU Canvas Rendering
+            // Classic CPU Canvas Rendering (Decoupled from physics for smooth multi-pass overlays)
             encode_agents(&mut self.encoder, field, 0xFF6366F1);
             let (ptr, len) = self.encoder.encode();
             self.render_ptr = ptr;
@@ -509,6 +542,60 @@ impl KernelBridge {
     /// Exposes a serialized JSON of the engine metrics to Javascript
     pub fn get_metrics_json(&self) -> String {
         self.telemetry.get_metrics_json()
+    }
+
+    /// Recursively orchestrates a high-level task through the agent hierarchy.
+    pub fn orchestrate_task(&mut self, root_script: &str, depth: u8) -> u32 {
+        if self.meta_agent.is_none() {
+            if let Ok(mut state) = self.state.write() {
+                self.meta_agent = Some(MetaAgent::new(32, &mut state.vfs));
+            }
+        }
+
+        if let Some(meta) = &mut self.meta_agent {
+            // In this implementation, we take the first orchestrator or create one
+            if meta.population.is_empty() {
+                meta.population.push(OrchestratorAgent::new(8));
+            }
+
+            let orch = &mut meta.population[0];
+            return orch.decompose(root_script, depth);
+        }
+        u32::MAX
+    }
+
+    /// Triggers a step in the recursive evolution cycle.
+    pub fn evolve_step(&mut self) {
+        let Ok(mut state) = self.state.write() else { return; };
+        let SharedState {
+            field,
+            workers,
+            messages,
+            env_grid,
+            vector_mem,
+            vfs: _,
+            spatial_grid,
+            config,
+        } = &mut *state;
+
+        let metrics = self.telemetry.metrics;
+
+        if let Some(meta) = &mut self.meta_agent {
+            let mut scope = rhai::Scope::new();
+            meta.evolve(
+                &mut self.script_engine,
+                &mut scope,
+                field,
+                workers,
+                messages,
+                env_grid,
+                vector_mem,
+                spatial_grid,
+                &mut self.encoder,
+                config,
+                metrics,
+            );
+        }
     }
 }
 

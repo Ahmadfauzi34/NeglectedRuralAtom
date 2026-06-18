@@ -8,6 +8,30 @@ thread_local! {
     static REGEX_CACHE: RefCell<HashMap<String, Regex>> = RefCell::new(HashMap::new());
 }
 
+fn get_cached_regex(pattern: &str, max_cache_items: usize) -> Option<Regex> {
+    let mut safe_pattern = pattern;
+    if safe_pattern.len() > 256 {
+        let mut end = 256;
+        while end > 0 && !safe_pattern.is_char_boundary(end) {
+            end -= 1;
+        }
+        safe_pattern = &safe_pattern[..end];
+    }
+
+    REGEX_CACHE.with(|cache_ref| {
+        let mut cache = cache_ref.borrow_mut();
+        if !cache.contains_key(safe_pattern) {
+            if cache.len() >= max_cache_items {
+                cache.clear();
+            }
+            if let Ok(re) = Regex::new(safe_pattern) {
+                cache.insert(safe_pattern.to_string(), re);
+            }
+        }
+        cache.get(safe_pattern).cloned()
+    })
+}
+
 /// Extracts a specific string value from a raw JSON payload using a top-level key.
 /// Returns an empty string if the key doesn't exist or parsing fails.
 /// This relies on a fast string search instead of parsing the entire DOM to avoid heavy allocations.
@@ -32,65 +56,23 @@ pub fn json_extract_string(json_str: &str, key: &str) -> String {
 
 /// Matches a regex pattern against a payload and returns the first match found.
 pub fn regex_extract(pattern: &str, text: &str, max_cache_items: usize) -> String {
-    let mut safe_pattern = pattern;
-    if safe_pattern.len() > 256 {
-        let mut end = 256;
-        while end > 0 && !safe_pattern.is_char_boundary(end) {
-            end -= 1;
+    if let Some(re) = get_cached_regex(pattern, max_cache_items) {
+        if let Some(mat) = re.find(text) {
+            return mat.as_str().to_string();
         }
-        safe_pattern = &safe_pattern[..end];
     }
-
-    REGEX_CACHE.with(|cache_ref| {
-        let mut cache = cache_ref.borrow_mut();
-        if !cache.contains_key(safe_pattern) {
-            // Anti-memory-leak: Clear cache if LLM generates too many unique regex patterns
-            if cache.len() >= max_cache_items {
-                cache.clear();
-            }
-            if let Ok(re) = Regex::new(safe_pattern) {
-                cache.insert(safe_pattern.to_string(), re);
-            }
-        }
-        if let Some(re) = cache.get(safe_pattern) {
-            if let Some(mat) = re.find(text) {
-                return mat.as_str().to_string();
-            }
-        }
-        String::new()
-    })
+    String::new()
 }
 
 /// Matches a regex pattern against a payload and returns all matches as a Rhai Array.
 pub fn regex_extract_all(pattern: &str, text: &str, max_cache_items: usize) -> Array {
-    let mut safe_pattern = pattern;
-    if safe_pattern.len() > 256 {
-        let mut end = 256;
-        while end > 0 && !safe_pattern.is_char_boundary(end) {
-            end -= 1;
+    let mut results = Array::new();
+    if let Some(re) = get_cached_regex(pattern, max_cache_items) {
+        for mat in re.find_iter(text) {
+            results.push(mat.as_str().to_string().into());
         }
-        safe_pattern = &safe_pattern[..end];
     }
-
-    REGEX_CACHE.with(|cache_ref| {
-        let mut cache = cache_ref.borrow_mut();
-        if !cache.contains_key(safe_pattern) {
-            // Anti-memory-leak: Clear cache if LLM generates too many unique regex patterns
-            if cache.len() >= max_cache_items {
-                cache.clear();
-            }
-            if let Ok(re) = Regex::new(safe_pattern) {
-                cache.insert(safe_pattern.to_string(), re);
-            }
-        }
-        let mut results = Array::new();
-        if let Some(re) = cache.get(safe_pattern) {
-            for mat in re.find_iter(text) {
-                results.push(mat.as_str().to_string().into());
-            }
-        }
-        results
-    })
+    results
 }
 
 /// Aggregates multiple number strings into a sum.

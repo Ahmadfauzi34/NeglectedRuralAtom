@@ -21,7 +21,11 @@ impl TensorPool {
         // Pop dari pool, zero-fill tanpa alloc baru
         self.buffers.pop().map_or_else(
             || Array3::zeros(self.shape),
-            |arc| Arc::try_unwrap(arc).unwrap_or_else(|a| (*a).clone()),
+            |arc| {
+                let mut data = Arc::try_unwrap(arc).unwrap_or_else(|a| (*a).clone());
+                data.fill(0.0);
+                data
+            },
         )
     }
 
@@ -145,14 +149,14 @@ impl SpectralCore {
     fn internal_dense_fft(&self, z: &Array3<f32>, steps: f32) -> SpectralOutput {
         let shape = z.dim();
 
-        // Pre-allocated bands, jangan vec![zeros; N] yang alloc N kali
+        // Pre-allocated bands to avoid multiple reallocations
         let mut bands = Vec::with_capacity(self.num_bands);
         for _ in 0..self.num_bands {
-            bands.push(Array3::zeros(shape)); // Reuse dari pool jika memungkinkan
+            // In a fully optimized implementation, we would acquire from a thread-local TensorPool
+            bands.push(Array3::zeros(shape));
         }
 
-        // Field-based: wave interference simulation sebagai continuous query
-        // Gunakan kernel convolution di spatial domain alih-alih discrete FFT bins
+        // Simple wave interference simulation via kernel convolution
         for (band_idx, band) in bands.iter_mut().enumerate() {
             let freq = (band_idx + 1) as f32 * steps;
             // Kernel convolution: z * kernel(frequency) -> continuous spectrum
@@ -189,14 +193,12 @@ impl SpectralCore {
 }
 
 #[inline(always)]
-fn convolve_kernel_3d(
-    _input: &Array3<f32>,
-    _output: &mut Array3<f32>,
-    _freq: f32,
-    _d_model: usize,
-) {
-    // Implementasi kernel convolution tanpa closure alloc
-    // Gunakan SOA-friendly indexing untuk cache locality
+fn convolve_kernel_3d(input: &Array3<f32>, output: &mut Array3<f32>, freq: f32, _d_model: usize) {
+    // Implementasi kernel convolution sederhana: sinusoidal response
+    // Ini mensimulasikan bagaimana 'field' bereaksi terhadap frekuensi tertentu
+    for (val_in, val_out) in input.iter().zip(output.iter_mut()) {
+        *val_out = val_in * (freq * 0.1).sin();
+    }
 }
 
 #[derive(Clone, CustomType)]
@@ -215,12 +217,20 @@ impl ZeroParamBridge {
         }
     }
 
-    pub fn forward(&mut self, y_tensor: Tensor3D, _z_tensor: Tensor3D) -> Tensor3D {
-        // layer norm inplace
-        let mut y_norm = (*y_tensor.data).clone();
-        layer_norm_inplace(&mut y_norm, 1e-6);
+    pub fn forward(&mut self, y_tensor: Tensor3D, z_tensor: Tensor3D) -> Tensor3D {
+        // Simple functional bridge: adds spatial (y) and logic (z) components
+        let y = &*y_tensor.data;
+        let z = &*z_tensor.data;
 
-        Tensor3D::new(Array3::zeros(y_norm.dim()))
+        let mut output = Array3::zeros(y.dim());
+        for ((out, &y_val), &z_val) in output.iter_mut().zip(y.iter()).zip(z.iter()) {
+            *out = (y_val + z_val) * self.scale;
+        }
+
+        // Apply layer norm to the result
+        layer_norm_inplace(&mut output, 1e-6);
+
+        Tensor3D::new(output)
     }
 }
 

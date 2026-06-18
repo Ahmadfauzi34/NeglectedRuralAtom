@@ -26,19 +26,23 @@ impl SpatialGrid {
     }
 
     pub fn clear(&mut self) {
-        // Clear inner vectors but keep capacity to avoid reallocation
-        for cell in self.cells.values_mut() {
-            cell.clear();
+        // Anti-memory-leak: If the grid has too many cells (e.g. agents scattered very far),
+        // completely clear the HashMap to free memory. Otherwise, just clear the inner vectors.
+        if self.cells.len() > 5000 {
+            self.cells.clear();
+        } else {
+            for cell in self.cells.values_mut() {
+                cell.clear();
+            }
         }
     }
 
     #[inline(always)]
     fn get_cell_key(&self, x: f32, y: f32) -> u64 {
         // Map 2D float coordinates to 1D integer grid index
-        // Optimize: Replace expensive float division and floor with inverse multiplication
-        // In this simulation, coords are generally positive. Using fast truncation casting.
-        let ix = (x * self.inv_cell_size) as i32;
-        let iy = (y * self.inv_cell_size) as i32;
+        // Use floor() to handle negative coordinates and maintain consistent cell alignment.
+        let ix = (x * self.inv_cell_size).floor() as i32;
+        let iy = (y * self.inv_cell_size).floor() as i32;
 
         let ux = u64::from(ix as u32);
         let uy = u64::from(iy as u32);
@@ -48,10 +52,13 @@ impl SpatialGrid {
 
     pub fn insert(&mut self, x: f32, y: f32, id: usize) {
         let key = self.get_cell_key(x, y);
-        self.cells
-            .entry(key)
-            .or_insert_with(|| Vec::with_capacity(16))
-            .push(id);
+        if let Some(cell) = self.cells.get_mut(&key) {
+            cell.push(id);
+        } else {
+            let mut v = Vec::with_capacity(16);
+            v.push(id);
+            self.cells.insert(key, v);
+        }
     }
 
     /// Queries the grid for neighbors around a coordinate within a radius.
@@ -65,11 +72,10 @@ impl SpatialGrid {
         let min_y = y - radius;
         let max_y = y + radius;
 
-        // Optimize: Replace expensive division and floor with inverse multiplication and fast cast
-        let start_ix = (min_x * self.inv_cell_size) as i32;
-        let end_ix = (max_x * self.inv_cell_size) as i32;
-        let start_iy = (min_y * self.inv_cell_size) as i32;
-        let end_iy = (max_y * self.inv_cell_size) as i32;
+        let start_ix = (min_x * self.inv_cell_size).floor() as i32;
+        let end_ix = (max_x * self.inv_cell_size).floor() as i32;
+        let start_iy = (min_y * self.inv_cell_size).floor() as i32;
+        let end_iy = (max_y * self.inv_cell_size).floor() as i32;
 
         for ix in start_ix..=end_ix {
             for iy in start_iy..=end_iy {

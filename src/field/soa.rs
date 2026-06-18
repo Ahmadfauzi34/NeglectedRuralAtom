@@ -27,6 +27,9 @@ pub struct AgentField {
     pub(crate) acc_x: Vec<f32>,
     pub(crate) acc_y: Vec<f32>,
 
+    /// Scratch buffer for neighbor queries to avoid per-agent allocation
+    pub(crate) neighbors_scratch: Vec<usize>,
+
     // Ghost state tracking
     pub(crate) len: usize,
     pub(crate) capacity: usize,
@@ -47,6 +50,7 @@ impl AgentField {
             behavior_state: Vec::with_capacity(initial_capacity),
             acc_x: Vec::with_capacity(initial_capacity),
             acc_y: Vec::with_capacity(initial_capacity),
+            neighbors_scratch: Vec::with_capacity(64),
             len: 0,
             capacity: initial_capacity,
         }
@@ -75,6 +79,10 @@ impl AgentField {
             .reserve(new_cap.saturating_sub(self.acc_x.capacity()));
         self.acc_y
             .reserve(new_cap.saturating_sub(self.acc_y.capacity()));
+        // neighbors_scratch doesn't need to be indexed 1:1 with agents, but it's good to have some initial capacity
+        if self.neighbors_scratch.capacity() < 64 {
+            self.neighbors_scratch.reserve(64);
+        }
         self.capacity = self.pos_x.capacity();
     }
 

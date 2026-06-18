@@ -8,6 +8,7 @@ use crate::field::{
 use crate::render::CanvasEncoder;
 use crate::svg_generator::SvgGenerator;
 use crate::telemetry::EngineMetrics;
+use crate::vfs::VirtualFileSystem;
 use rhai::{Array, CustomType, Engine, Scope};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
@@ -27,18 +28,25 @@ pub struct ScriptEngine {
 #[derive(Clone, CustomType)]
 pub struct FieldContext {
     ptr: *mut AgentField,
+    grid_ptr: *mut crate::field::SpatialGrid,
 }
 
 impl FieldContext {
-    pub fn new(field: &mut AgentField) -> Self {
+    pub fn new(field: &mut AgentField, grid: &mut crate::field::SpatialGrid) -> Self {
         Self {
             ptr: std::ptr::from_mut::<AgentField>(field),
+            grid_ptr: std::ptr::from_mut::<crate::field::SpatialGrid>(grid),
         }
     }
 
     #[inline]
     fn get_field(&mut self) -> &mut AgentField {
         unsafe { &mut *self.ptr }
+    }
+
+    #[inline]
+    fn get_grid(&mut self) -> &mut crate::field::SpatialGrid {
+        unsafe { &mut *self.grid_ptr }
     }
 
     // --- PRIMITIVE API FOR RHAI ---
@@ -63,6 +71,114 @@ impl FieldContext {
         } else {
             0.0
         }
+    }
+
+    pub fn get_vel_x(&mut self, idx: i64) -> f64 {
+        let field = self.get_field();
+        if idx >= 0 {
+            f64::from(field.vel_x.get(idx as usize).copied().unwrap_or(0.0))
+        } else {
+            0.0
+        }
+    }
+
+    pub fn get_vel_y(&mut self, idx: i64) -> f64 {
+        let field = self.get_field();
+        if idx >= 0 {
+            f64::from(field.vel_y.get(idx as usize).copied().unwrap_or(0.0))
+        } else {
+            0.0
+        }
+    }
+
+    pub fn get_health(&mut self, idx: i64) -> f64 {
+        let field = self.get_field();
+        if idx >= 0 {
+            f64::from(field.health.get(idx as usize).copied().unwrap_or(0.0))
+        } else {
+            0.0
+        }
+    }
+
+    pub fn get_target(&mut self, idx: i64) -> i64 {
+        let field = self.get_field();
+        if idx >= 0 {
+            let t = field.target_id.get(idx as usize).copied().unwrap_or(u32::MAX);
+            if t == u32::MAX {
+                -1
+            } else {
+                i64::from(t)
+            }
+        } else {
+            -1
+        }
+    }
+
+    pub fn set_target(&mut self, idx: i64, target_id: i64) {
+        let field = self.get_field();
+        if idx >= 0 {
+            if let Some(t_ref) = field.target_id.get_mut(idx as usize) {
+                *t_ref = if target_id < 0 {
+                    u32::MAX
+                } else {
+                    target_id as u32
+                };
+            }
+        }
+    }
+
+    pub fn get_active(&mut self, idx: i64) -> bool {
+        let field = self.get_field();
+        if idx >= 0 {
+            field.active.get(idx as usize).copied().unwrap_or(0) == 1
+        } else {
+            false
+        }
+    }
+
+    pub fn get_neighbors(&mut self, idx: i64, radius: f64) -> Array {
+        let mut results = Array::new();
+        let field = self.get_field();
+        if idx >= 0 && (idx as usize) < field.len {
+            let u_idx = idx as usize;
+            let px = field.pos_x[u_idx];
+            let py = field.pos_y[u_idx];
+
+            let mut neighbors_indices = Vec::new();
+            {
+                let grid = self.get_grid();
+                grid.query_neighbors(px, py, radius as f32, &mut neighbors_indices);
+            }
+
+            // Re-fetch field for bounds checking and data access
+            let field = self.get_field();
+            let r_sq = (radius * radius) as f32;
+            for &j in &neighbors_indices {
+                if j == u_idx || field.active[j] == 0 {
+                    continue;
+                }
+                let dx = field.pos_x[j] - px;
+                let dy = field.pos_y[j] - py;
+                if dx * dx + dy * dy <= r_sq {
+                    results.push(rhai::Dynamic::from(j as i64));
+                }
+            }
+        }
+        results
+    }
+
+    pub fn get_distance(&mut self, idx1: i64, idx2: i64) -> f64 {
+        let field = self.get_field();
+        if idx1 >= 0 && idx2 >= 0 {
+            let u1 = idx1 as usize;
+            let u2 = idx2 as usize;
+            if u1 < field.len && u2 < field.len {
+                let dx = field.pos_x[u1] - field.pos_x[u2];
+                let dy = field.pos_y[u1] - field.pos_y[u2];
+                return f64::from((dx * dx + dy * dy).sqrt());
+            }
+        }
+        0.0
     }
 
     pub fn get_behavior(&mut self, idx: i64) -> i64 {
@@ -179,6 +295,24 @@ impl WorkerContext {
         }
     }
 
+    pub fn get_worker_task_id(&mut self, idx: i64) -> i64 {
+        let workers = self.get_workers();
+        if idx >= 0 {
+            i64::from(workers.task_ids.get(idx as usize).copied().unwrap_or(0))
+        } else {
+            0
+        }
+    }
+
+    pub fn get_worker_progress(&mut self, idx: i64) -> f64 {
+        let workers = self.get_workers();
+        if idx >= 0 {
+            f64::from(workers.progress.get(idx as usize).copied().unwrap_or(0.0))
+        } else {
+            0.0
+        }
+    }
+
     pub fn get_worker_payload(&mut self, idx: i64) -> String {
         let workers = self.get_workers();
         if idx >= 0 && (idx as usize) < workers.len {
@@ -226,6 +360,14 @@ impl WorkerContext {
                 mem[slot as usize] = value as f32;
             }
         }
+    }
+
+    pub fn compact_arena(&mut self) {
+        self.get_workers().compact_arena();
+    }
+
+    pub fn get_worker_count(&mut self) -> i64 {
+        self.get_workers().len as i64
     }
 }
 
@@ -286,6 +428,20 @@ impl MessageContext {
         }
     }
 
+    pub fn get_receiver(&mut self, idx: i64) -> i64 {
+        let bus = self.get_bus();
+        if idx >= 0 && (idx as usize) < bus.len {
+            let r = bus.receiver_ids.get(idx as usize).copied().unwrap_or(0);
+            if r == BROADCAST_ID {
+                -1
+            } else {
+                i64::from(r)
+            }
+        } else {
+            -1
+        }
+    }
+
     pub fn get_type(&mut self, idx: i64) -> i64 {
         let bus = self.get_bus();
         if idx >= 0 && (idx as usize) < bus.len {
@@ -293,6 +449,10 @@ impl MessageContext {
         } else {
             -1
         }
+    }
+
+    pub fn clear(&mut self) {
+        self.get_bus().clear();
     }
 }
 
@@ -324,6 +484,26 @@ impl EnvironmentContext {
 
     pub fn add_value(&mut self, x: f32, y: f32, amount: f32) {
         self.get_env().add_value(x, y, amount);
+    }
+
+    pub fn decay(&mut self, factor: f32) {
+        self.get_env().decay(factor);
+    }
+
+    pub fn clear(&mut self) {
+        self.get_env().clear();
+    }
+
+    pub fn get_width(&mut self) -> i64 {
+        self.get_env().width as i64
+    }
+
+    pub fn get_height(&mut self) -> i64 {
+        self.get_env().height as i64
+    }
+
+    pub fn get_cell_size(&mut self) -> f64 {
+        f64::from(self.get_env().cell_size)
     }
 }
 
@@ -373,6 +553,14 @@ impl VectorMemoryContext {
             String::new()
         }
     }
+
+    pub fn clear(&mut self) {
+        self.get_mem().clear();
+    }
+
+    pub fn get_count(&mut self) -> i64 {
+        self.get_mem().len as i64
+    }
 }
 
 impl ScriptEngine {
@@ -395,6 +583,14 @@ impl ScriptEngine {
         engine.register_fn("get_count", FieldContext::get_count);
         engine.register_fn("get_x", FieldContext::get_x);
         engine.register_fn("get_y", FieldContext::get_y);
+        engine.register_fn("get_vel_x", FieldContext::get_vel_x);
+        engine.register_fn("get_vel_y", FieldContext::get_vel_y);
+        engine.register_fn("get_health", FieldContext::get_health);
+        engine.register_fn("get_target", FieldContext::get_target);
+        engine.register_fn("set_target", FieldContext::set_target);
+        engine.register_fn("get_active", FieldContext::get_active);
+        engine.register_fn("get_neighbors", FieldContext::get_neighbors);
+        engine.register_fn("get_distance", FieldContext::get_distance);
         engine.register_fn("get_behavior", FieldContext::get_behavior);
         engine.register_fn("set_behavior", FieldContext::set_behavior);
         engine.register_fn("set_velocity", FieldContext::set_velocity);
@@ -407,6 +603,32 @@ impl ScriptEngine {
         engine.register_fn("get_count", |ctx: &mut FieldContext| ctx.get_count());
         engine.register_fn("get_x", |ctx: &mut FieldContext, idx: i64| ctx.get_x(idx));
         engine.register_fn("get_y", |ctx: &mut FieldContext, idx: i64| ctx.get_y(idx));
+        engine.register_fn("get_vel_x", |ctx: &mut FieldContext, idx: i64| {
+            ctx.get_vel_x(idx)
+        });
+        engine.register_fn("get_vel_y", |ctx: &mut FieldContext, idx: i64| {
+            ctx.get_vel_y(idx)
+        });
+        engine.register_fn("get_health", |ctx: &mut FieldContext, idx: i64| {
+            ctx.get_health(idx)
+        });
+        engine.register_fn("get_target", |ctx: &mut FieldContext, idx: i64| {
+            ctx.get_target(idx)
+        });
+        engine.register_fn("set_target", |ctx: &mut FieldContext, idx: i64, target: i64| {
+            ctx.set_target(idx, target)
+        });
+        engine.register_fn("get_active", |ctx: &mut FieldContext, idx: i64| {
+            ctx.get_active(idx)
+        });
+        engine.register_fn(
+            "get_neighbors",
+            |ctx: &mut FieldContext, idx: i64, r: f64| ctx.get_neighbors(idx, r),
+        );
+        engine.register_fn(
+            "get_distance",
+            |ctx: &mut FieldContext, i1: i64, i2: i64| ctx.get_distance(i1, i2),
+        );
         engine.register_fn("get_behavior", |ctx: &mut FieldContext, idx: i64| {
             ctx.get_behavior(idx)
         });
@@ -439,11 +661,15 @@ impl ScriptEngine {
         engine.register_fn("spawn_worker", WorkerContext::spawn_worker);
         engine.register_fn("spawn_workers_batch", WorkerContext::spawn_workers_batch);
         engine.register_fn("get_worker_state", WorkerContext::get_worker_state);
+        engine.register_fn("get_worker_task_id", WorkerContext::get_worker_task_id);
+        engine.register_fn("get_worker_progress", WorkerContext::get_worker_progress);
         engine.register_fn("get_worker_payload", WorkerContext::get_worker_payload);
         engine.register_fn("set_worker_result", WorkerContext::set_worker_result);
         engine.register_fn("kill_worker", WorkerContext::kill_worker);
         engine.register_fn("get_worker_memory", WorkerContext::get_worker_memory);
         engine.register_fn("set_worker_memory", WorkerContext::set_worker_memory);
+        engine.register_fn("compact_arena", WorkerContext::compact_arena);
+        engine.register_fn("get_worker_count", WorkerContext::get_worker_count);
 
         // --- MESSAGE BUS APIS FOR RHAI ---
         engine.build_type::<MessageContext>();
@@ -451,25 +677,36 @@ impl ScriptEngine {
         engine.register_fn("msg_count", MessageContext::get_message_count);
         engine.register_fn("msg_payload", MessageContext::get_payload);
         engine.register_fn("msg_sender", MessageContext::get_sender);
+        engine.register_fn("msg_receiver", MessageContext::get_receiver);
         engine.register_fn("msg_type", MessageContext::get_type);
+        engine.register_fn("msg_clear", MessageContext::clear);
 
         // --- ENVIRONMENT GRID APIS FOR RHAI ---
         engine.build_type::<EnvironmentContext>();
         engine.register_fn("env_get", EnvironmentContext::get_value);
         engine.register_fn("env_set", EnvironmentContext::set_value);
         engine.register_fn("env_add", EnvironmentContext::add_value);
+        engine.register_fn("env_decay", EnvironmentContext::decay);
+        engine.register_fn("env_clear", EnvironmentContext::clear);
+        engine.register_fn("env_width", EnvironmentContext::get_width);
+        engine.register_fn("env_height", EnvironmentContext::get_height);
+        engine.register_fn("env_cell_size", EnvironmentContext::get_cell_size);
 
         // --- VECTOR MEMORY APIS FOR RHAI ---
         engine.build_type::<VectorMemoryContext>();
         engine.register_fn("mem_store", VectorMemoryContext::store);
         engine.register_fn("mem_search", VectorMemoryContext::search);
+        engine.register_fn("mem_clear", VectorMemoryContext::clear);
+        engine.register_fn("mem_count", VectorMemoryContext::get_count);
 
         // --- DOM MANIPULATION APIS FOR RHAI ---
+        let dom_ctx = DomContext::new();
 
+        let dom = dom_ctx.clone();
         engine.register_fn(
             "dom_get_html",
-            |target_id: &str| -> Result<String, String> {
-                if let Some(dom) = DomContext::new() {
+            move |target_id: &str| -> Result<String, String> {
+                if let Some(dom) = &dom {
                     dom.get_html(target_id)
                 } else {
                     Err("DOM Context unavailable".to_string())
@@ -477,10 +714,11 @@ impl ScriptEngine {
             },
         );
 
+        let dom = dom_ctx.clone();
         engine.register_fn(
             "dom_insert_html",
-            |target_id: &str, position: &str, html: &str| -> Result<(), String> {
-                if let Some(dom) = DomContext::new() {
+            move |target_id: &str, position: &str, html: &str| -> Result<(), String> {
+                if let Some(dom) = &dom {
                     dom.insert_html_at(target_id, position, html)
                 } else {
                     Err("DOM Context unavailable".to_string())
@@ -488,10 +726,11 @@ impl ScriptEngine {
             },
         );
 
+        let dom = dom_ctx.clone();
         engine.register_fn(
             "dom_diff_replace_html",
-            |target_id: &str, old_str: &str, new_str: &str| -> Result<bool, String> {
-                if let Some(dom) = DomContext::new() {
+            move |target_id: &str, old_str: &str, new_str: &str| -> Result<bool, String> {
+                if let Some(dom) = &dom {
                     dom.diff_and_replace_html(target_id, old_str, new_str)
                 } else {
                     Err("DOM Context unavailable".to_string())
@@ -499,10 +738,11 @@ impl ScriptEngine {
             },
         );
 
+        let dom = dom_ctx.clone();
         engine.register_fn(
             "dom_append_html",
-            |target_id: &str, html: &str| -> Result<(), String> {
-                if let Some(dom) = DomContext::new() {
+            move |target_id: &str, html: &str| -> Result<(), String> {
+                if let Some(dom) = &dom {
                     dom.append_html(target_id, html)
                 } else {
                     Err("DOM Context unavailable".to_string())
@@ -510,10 +750,11 @@ impl ScriptEngine {
             },
         );
 
+        let dom = dom_ctx.clone();
         engine.register_fn(
             "dom_set_inner_html",
-            |target_id: &str, html: &str| -> Result<(), String> {
-                if let Some(dom) = DomContext::new() {
+            move |target_id: &str, html: &str| -> Result<(), String> {
+                if let Some(dom) = &dom {
                     dom.set_inner_html(target_id, html)
                 } else {
                     Err("DOM Context unavailable".to_string())
@@ -521,10 +762,11 @@ impl ScriptEngine {
             },
         );
 
+        let dom = dom_ctx.clone();
         engine.register_fn(
             "dom_set_text",
-            |target_id: &str, text: &str| -> Result<(), String> {
-                if let Some(dom) = DomContext::new() {
+            move |target_id: &str, text: &str| -> Result<(), String> {
+                if let Some(dom) = &dom {
                     dom.set_text_content(target_id, text)
                 } else {
                     Err("DOM Context unavailable".to_string())
@@ -532,10 +774,11 @@ impl ScriptEngine {
             },
         );
 
+        let dom = dom_ctx.clone();
         engine.register_fn(
             "dom_set_style",
-            |target_id: &str, property: &str, value: &str| -> Result<(), String> {
-                if let Some(dom) = DomContext::new() {
+            move |target_id: &str, property: &str, value: &str| -> Result<(), String> {
+                if let Some(dom) = &dom {
                     dom.set_style(target_id, property, value)
                 } else {
                     Err("DOM Context unavailable".to_string())
@@ -543,10 +786,11 @@ impl ScriptEngine {
             },
         );
 
+        let dom = dom_ctx.clone();
         engine.register_fn(
             "dom_get_value",
-            |target_id: &str| -> Result<String, String> {
-                if let Some(dom) = DomContext::new() {
+            move |target_id: &str| -> Result<String, String> {
+                if let Some(dom) = &dom {
                     dom.get_value(target_id)
                 } else {
                     Err("DOM Context unavailable".to_string())
@@ -554,16 +798,17 @@ impl ScriptEngine {
             },
         );
 
+        let dom = dom_ctx.clone();
         engine.register_fn(
             "dom_canvas_fill_rect",
-            |target_id: &str,
-             x: f64,
-             y: f64,
-             w: f64,
-             h: f64,
-             fill_style: &str|
-             -> Result<(), String> {
-                if let Some(dom) = DomContext::new() {
+            move |target_id: &str,
+                  x: f64,
+                  y: f64,
+                  w: f64,
+                  h: f64,
+                  fill_style: &str|
+                  -> Result<(), String> {
+                if let Some(dom) = &dom {
                     dom.canvas_fill_rect(target_id, x, y, w, h, fill_style)
                 } else {
                     Err("DOM Context unavailable".to_string())
@@ -571,10 +816,11 @@ impl ScriptEngine {
             },
         );
 
+        let dom = dom_ctx.clone();
         engine.register_fn(
             "dom_canvas_clear_rect",
-            |target_id: &str, x: f64, y: f64, w: f64, h: f64| -> Result<(), String> {
-                if let Some(dom) = DomContext::new() {
+            move |target_id: &str, x: f64, y: f64, w: f64, h: f64| -> Result<(), String> {
+                if let Some(dom) = &dom {
                     dom.canvas_clear_rect(target_id, x, y, w, h)
                 } else {
                     Err("DOM Context unavailable".to_string())
@@ -582,16 +828,17 @@ impl ScriptEngine {
             },
         );
 
+        let dom = dom_ctx.clone();
         engine.register_fn(
             "dom_canvas_draw_text",
-            |target_id: &str,
-             text: &str,
-             x: f64,
-             y: f64,
-             font: &str,
-             color: &str|
-             -> Result<(), String> {
-                if let Some(dom) = DomContext::new() {
+            move |target_id: &str,
+                  text: &str,
+                  x: f64,
+                  y: f64,
+                  font: &str,
+                  color: &str|
+                  -> Result<(), String> {
+                if let Some(dom) = &dom {
                     dom.canvas_draw_text(target_id, text, x, y, font, color)
                 } else {
                     Err("DOM Context unavailable".to_string())
@@ -630,11 +877,23 @@ impl ScriptEngine {
         engine.register_fn("get_script_ms", |m: &mut EngineMetrics| -> f64 {
             m.scripting_eval_ms
         });
+        engine.register_fn("get_compaction_ms", |m: &mut EngineMetrics| -> f64 {
+            m.arena_compaction_ms
+        });
+        engine.register_fn("get_active_agents", |m: &mut EngineMetrics| -> i64 {
+            m.active_physics_agents as i64
+        });
         engine.register_fn("get_active_workers", |m: &mut EngineMetrics| -> i64 {
             m.active_data_workers as i64
         });
         engine.register_fn("get_arena_bytes", |m: &mut EngineMetrics| -> i64 {
             m.text_arena_bytes as i64
+        });
+        engine.register_fn("get_msg_count", |m: &mut EngineMetrics| -> i64 {
+            m.total_messages as i64
+        });
+        engine.register_fn("get_vector_count", |m: &mut EngineMetrics| -> i64 {
+            m.memory_vector_count as i64
         });
 
         // --- TENSOR LOGIC / ASYMMETRIC SPARSE CORE APIS FOR RHAI ---
@@ -676,6 +935,43 @@ impl ScriptEngine {
         engine.register_fn("get_cursor_x", ConfigContext::get_cursor_x);
         engine.register_fn("get_cursor_y", ConfigContext::get_cursor_y);
         engine.register_fn("get_cursor_weight", ConfigContext::get_cursor_weight);
+        engine.register_fn("get_dt", ConfigContext::get_dt);
+        engine.register_fn("get_friction", ConfigContext::get_friction);
+        engine.register_fn("get_max_speed", ConfigContext::get_max_speed);
+        engine.register_fn("get_influence_radius", ConfigContext::get_influence_radius);
+        engine.register_fn("get_separation_weight", ConfigContext::get_separation_weight);
+        engine.register_fn("get_alignment_weight", ConfigContext::get_alignment_weight);
+        engine.register_fn("get_cohesion_weight", ConfigContext::get_cohesion_weight);
+        engine.register_fn("get_max_vfs_bytes", ConfigContext::get_max_vfs_bytes);
+        engine.register_fn(
+            "get_max_graph_context_bytes",
+            ConfigContext::get_max_graph_context_bytes,
+        );
+        engine.register_fn(
+            "get_max_regex_cache_items",
+            ConfigContext::get_max_regex_cache_items,
+        );
+        engine.register_fn(
+            "get_worker_arena_bytes_per_agent",
+            ConfigContext::get_worker_arena_bytes_per_agent,
+        );
+        engine.register_fn(
+            "get_bus_arena_bytes_per_agent",
+            ConfigContext::get_bus_arena_bytes_per_agent,
+        );
+        engine.register_fn(
+            "get_vector_memory_bytes_per_capacity",
+            ConfigContext::get_vector_memory_bytes_per_capacity,
+        );
+
+        // --- VFS APIS FOR RHAI ---
+        engine.build_type::<VfsContext>();
+        engine.register_fn("vfs_write", VfsContext::write_file);
+        engine.register_fn("vfs_read", VfsContext::read_file);
+        engine.register_fn("vfs_edit", VfsContext::edit_file);
+        engine.register_fn("vfs_list", VfsContext::list_directory);
+        engine.register_fn("vfs_search", VfsContext::search_files);
+        engine.register_fn("vfs_total_bytes", VfsContext::get_total_bytes);
 
         // Graph Context (for AST caching parallel execution)
         engine.build_type::<crate::graph::GraphContext>();
@@ -748,15 +1044,18 @@ impl ScriptEngine {
         messages: &mut MessageBus,
         env_grid: &mut EnvironmentGrid,
         vector_mem: &mut VectorMemory,
+        vfs: &mut VirtualFileSystem,
+        spatial_grid: &mut crate::field::SpatialGrid,
         encoder: &mut CanvasEncoder,
         config: &crate::field::KernelConfig,
         metrics: EngineMetrics,
     ) -> Result<String, String> {
-        let f_ctx = FieldContext::new(field);
+        let f_ctx = FieldContext::new(field, spatial_grid);
         let w_ctx = WorkerContext::new(workers);
         let m_ctx = MessageContext::new(messages);
         let e_ctx = EnvironmentContext::new(env_grid);
         let v_ctx = VectorMemoryContext::new(vector_mem);
+        let vf_ctx = VfsContext::new(vfs);
         let r_ctx = RenderContext::new(encoder);
         let k_ctx = ConfigContext::new(config);
 
@@ -765,6 +1064,7 @@ impl ScriptEngine {
         scope.push("messages", m_ctx);
         scope.push("env_grid", e_ctx);
         scope.push("vector_mem", v_ctx);
+        scope.push("vfs", vf_ctx);
         scope.push("canvas", r_ctx);
         scope.push("kernel", k_ctx);
         scope.push("metrics", metrics);
@@ -789,13 +1089,25 @@ impl ScriptEngine {
         messages: &mut MessageBus,
         env_grid: &mut EnvironmentGrid,
         vector_mem: &mut VectorMemory,
+        vfs: &mut VirtualFileSystem,
+        spatial_grid: &mut crate::field::SpatialGrid,
         encoder: &mut CanvasEncoder,
         config: &crate::field::KernelConfig,
         metrics: EngineMetrics,
     ) -> Result<String, String> {
         let mut scope = Scope::new();
         self.eval_with_injected_scope(
-            &mut scope, script, field, workers, messages, env_grid, vector_mem, encoder, config,
+            &mut scope,
+            script,
+            field,
+            workers,
+            messages,
+            env_grid,
+            vector_mem,
+            vfs,
+            spatial_grid,
+            encoder,
+            config,
             metrics,
         )
     }
@@ -867,5 +1179,108 @@ impl ConfigContext {
 
     pub fn get_cursor_weight(&mut self) -> f64 {
         f64::from(self.get_config().cursor_weight)
+    }
+
+    pub fn get_dt(&mut self) -> f64 {
+        f64::from(self.get_config().dt)
+    }
+
+    pub fn get_friction(&mut self) -> f64 {
+        f64::from(self.get_config().friction)
+    }
+
+    pub fn get_max_speed(&mut self) -> f64 {
+        f64::from(self.get_config().max_speed)
+    }
+
+    pub fn get_influence_radius(&mut self) -> f64 {
+        f64::from(self.get_config().influence_radius)
+    }
+
+    pub fn get_separation_weight(&mut self) -> f64 {
+        f64::from(self.get_config().separation_weight)
+    }
+
+    pub fn get_alignment_weight(&mut self) -> f64 {
+        f64::from(self.get_config().alignment_weight)
+    }
+
+    pub fn get_cohesion_weight(&mut self) -> f64 {
+        f64::from(self.get_config().cohesion_weight)
+    }
+
+    pub fn get_max_vfs_bytes(&mut self) -> i64 {
+        self.get_config().max_vfs_bytes as i64
+    }
+
+    pub fn get_max_graph_context_bytes(&mut self) -> i64 {
+        self.get_config().max_graph_context_bytes as i64
+    }
+
+    pub fn get_max_regex_cache_items(&mut self) -> i64 {
+        self.get_config().max_regex_cache_items as i64
+    }
+
+    pub fn get_worker_arena_bytes_per_agent(&mut self) -> i64 {
+        self.get_config().worker_arena_bytes_per_agent as i64
+    }
+
+    pub fn get_bus_arena_bytes_per_agent(&mut self) -> i64 {
+        self.get_config().bus_arena_bytes_per_agent as i64
+    }
+
+    pub fn get_vector_memory_bytes_per_capacity(&mut self) -> i64 {
+        self.get_config().vector_memory_bytes_per_capacity as i64
+    }
+}
+
+/// A wrapper pointer context to allow Rhai to safely manipulate the `VirtualFileSystem`.
+#[derive(Clone, CustomType)]
+pub struct VfsContext {
+    ptr: *mut VirtualFileSystem,
+}
+
+impl VfsContext {
+    pub fn new(vfs: &mut VirtualFileSystem) -> Self {
+        Self {
+            ptr: std::ptr::from_mut::<VirtualFileSystem>(vfs),
+        }
+    }
+
+    #[inline]
+    fn get_vfs(&mut self) -> &mut VirtualFileSystem {
+        unsafe { &mut *self.ptr }
+    }
+
+    pub fn write_file(&mut self, path: &str, content: &str) {
+        self.get_vfs().write_file(path, content);
+    }
+
+    pub fn read_file(&mut self, path: &str) -> String {
+        self.get_vfs().read_file(path).unwrap_or_default()
+    }
+
+    pub fn edit_file(&mut self, path: &str, append_content: &str) {
+        self.get_vfs().edit_file(path, append_content);
+    }
+
+    pub fn list_directory(&mut self, prefix: &str) -> Array {
+        self.get_vfs()
+            .list_directory(prefix)
+            .into_iter()
+            .map(rhai::Dynamic::from)
+            .collect()
+    }
+
+    pub fn search_files(&mut self, pattern: &str) -> Array {
+        self.get_vfs()
+            .search_files(pattern)
+            .into_iter()
+            .map(rhai::Dynamic::from)
+            .collect()
+    }
+
+    pub fn get_total_bytes(&mut self) -> i64 {
+        self.get_vfs().total_bytes as i64
     }
 }
