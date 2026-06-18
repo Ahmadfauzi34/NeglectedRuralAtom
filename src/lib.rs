@@ -38,6 +38,7 @@ pub mod dom;
 mod field;
 pub mod graph;
 pub mod prompt;
+pub mod recursive;
 mod render;
 pub mod scripting;
 pub mod svg_generator;

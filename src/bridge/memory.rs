@@ -8,6 +8,7 @@ use crate::field::{
 };
 use crate::graph::{GraphExecutor, ScriptNode};
 use crate::prompt::PromptBuilder;
+use crate::recursive::{MetaAgent, OrchestratorAgent};
 use crate::render::{agent_renderer::encode_agents, CanvasEncoder, GpuBuffer};
 use crate::scripting::ScriptEngine;
 use crate::telemetry::Telemetry;
@@ -42,6 +43,7 @@ pub struct KernelBridge {
     telemetry: Telemetry,
     graph_executor: GraphExecutor,
     worker_callback: Option<js_sys::Function>,
+    meta_agent: Option<MetaAgent>,
 }
 
 #[wasm_bindgen]
@@ -91,6 +93,7 @@ impl KernelBridge {
             telemetry: Telemetry::new(),
             graph_executor: GraphExecutor::new(config.max_graph_context_bytes),
             worker_callback: None,
+            meta_agent: None, // Lazy initialization or specific command trigger
         }
     }
 
@@ -539,6 +542,60 @@ impl KernelBridge {
     /// Exposes a serialized JSON of the engine metrics to Javascript
     pub fn get_metrics_json(&self) -> String {
         self.telemetry.get_metrics_json()
+    }
+
+    /// Recursively orchestrates a high-level task through the agent hierarchy.
+    pub fn orchestrate_task(&mut self, root_script: &str, depth: u8) -> u32 {
+        if self.meta_agent.is_none() {
+            if let Ok(mut state) = self.state.write() {
+                self.meta_agent = Some(MetaAgent::new(32, &mut state.vfs));
+            }
+        }
+
+        if let Some(meta) = &mut self.meta_agent {
+            // In this implementation, we take the first orchestrator or create one
+            if meta.population.is_empty() {
+                meta.population.push(OrchestratorAgent::new(8));
+            }
+
+            let orch = &mut meta.population[0];
+            return orch.decompose(root_script, depth);
+        }
+        u32::MAX
+    }
+
+    /// Triggers a step in the recursive evolution cycle.
+    pub fn evolve_step(&mut self) {
+        let Ok(mut state) = self.state.write() else { return; };
+        let SharedState {
+            field,
+            workers,
+            messages,
+            env_grid,
+            vector_mem,
+            vfs: _,
+            spatial_grid,
+            config,
+        } = &mut *state;
+
+        let metrics = self.telemetry.metrics;
+
+        if let Some(meta) = &mut self.meta_agent {
+            let mut scope = rhai::Scope::new();
+            meta.evolve(
+                &mut self.script_engine,
+                &mut scope,
+                field,
+                workers,
+                messages,
+                env_grid,
+                vector_mem,
+                spatial_grid,
+                &mut self.encoder,
+                config,
+                metrics,
+            );
+        }
     }
 }
 
